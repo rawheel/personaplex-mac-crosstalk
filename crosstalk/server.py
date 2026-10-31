@@ -77,6 +77,7 @@ class Session:
         self.ready.set()
 
         pending = np.zeros(0, dtype=np.float32)
+        encoding = decoding = 0  # frames handed to Mimi's worker threads, not yet returned
         while not self.stop.is_set():
             idle = True
             try:
@@ -86,6 +87,7 @@ class Session:
                 pending = np.concatenate([pending, chunk])
                 while pending.shape[-1] >= FRAME_SIZE:
                     mimi.encode(pending[:FRAME_SIZE])
+                    encoding += 1
                     pending = pending[FRAME_SIZE:]
                 idle = False
             except queue.Empty:
@@ -93,6 +95,7 @@ class Session:
 
             codes = mimi.get_encoded()
             if codes is not None:
+                encoding -= 1
                 idle = False
                 user = np.asarray(codes).reshape(8).astype(np.int64)  # [8, 1] per frame
                 t = time.perf_counter()
@@ -107,12 +110,25 @@ class Session:
                     if piece:
                         self.text_out.put(piece)
                     mimi.decode(out[None, 1:].astype(np.uint32))  # [1, 8] -> 1920 samples
+                    decoding += 1
 
             decoded = mimi.get_decoded()
             if decoded is not None:
+                decoding -= 1
                 idle = False
                 self.pcm_out.put(np.asarray(decoded, dtype=np.float32).reshape(-1))
             if idle:
+                time.sleep(0.002)
+
+        # Collect the frames Mimi is still working on: dropping it mid-frame makes its
+        # threads log "sending on a closed channel".
+        deadline = time.time() + 1.0
+        while (encoding > 0 or decoding > 0) and time.time() < deadline:
+            if mimi.get_encoded() is not None:
+                encoding -= 1
+            elif mimi.get_decoded() is not None:
+                decoding -= 1
+            else:
                 time.sleep(0.002)
 
     def summary(self) -> str:
