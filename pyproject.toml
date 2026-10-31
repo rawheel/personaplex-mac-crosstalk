@@ -1,0 +1,32 @@
+[project]
+name = "crosstalk"
+version = "0.1.0"
+description = "Full-duplex voice agents on Apple Silicon: NVIDIA PersonaPlex running on MLX"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+dependencies = [
+    "mlx>=0.26",
+    "numpy>=2.1,<2.3",
+    "safetensors>=0.4",
+    "huggingface-hub>=0.24",
+    "rustymimi==0.4.1",
+    "sphn>=0.2,<0.3",
+    "sentencepiece>=0.2",
+    "aiohttp>=3.10",
+]
+
+[project.scripts]
+crosstalk-convert = "crosstalk.convert:main"
+crosstalk-serve = "crosstalk.server:main"
+crosstalk-bench = "crosstalk.bench:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["crosstalk*"]
+
+[tool.setuptools.package-data]
+crosstalk = ["web/*", "data/*.json"]

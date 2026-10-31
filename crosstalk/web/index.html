@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harbor Lane Realty · Voice agent</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="logo" aria-hidden="true">HL</div>
+      <div>
+        <h1 id="agency">Harbor Lane Realty</h1>
+        <p class="sub">Talk to <span id="agent-name">Maya</span>, our sales agent, and book a viewing</p>
+      </div>
+    </div>
+    <span id="status" class="pill">Loading…</span>
+  </header>
+
+  <main>
+    <section class="panel" aria-labelledby="listings-title">
+      <h2 id="listings-title">Listings</h2>
+      <div id="listings" class="listings"></div>
+    </section>
+
+    <section class="panel call" aria-labelledby="call-title">
+      <h2 id="call-title">Call</h2>
+      <div class="call-center">
+        <button id="call-btn" class="call-btn" disabled>
+          <span class="call-icon" aria-hidden="true"></span>
+          <span id="call-label">Start call</span>
+        </button>
+        <div class="meters">
+          <div class="meter"><span>You</span><div class="bar"><i id="mic-level"></i></div></div>
+          <div class="meter"><span id="agent-label">Maya</span><div class="bar agent"><i id="agent-level"></i></div></div>
+        </div>
+        <p class="hint">Use headphones for the best experience: the agent can hear itself through speakers.</p>
+      </div>
+
+      <div class="transcript-wrap">
+        <div class="transcript-head">
+          <h3>What the agent said</h3>
+          <button id="clear-transcript" class="link">Clear</button>
+        </div>
+        <div id="transcript" class="transcript" aria-live="polite"></div>
+      </div>
+
+      <details class="settings">
+        <summary>Voice and prompt</summary>
+        <label>Voice
+          <select id="voice"></select>
+        </label>
+        <label>Role prompt <small>(built from the listings and free viewing times; edits apply to the next call)</small>
+          <textarea id="prompt" rows="7"></textarea>
+        </label>
+        <button id="reset-prompt" class="link">Reset to the listings prompt</button>
+      </details>
+    </section>
+
+    <section class="panel" aria-labelledby="book-title">
+      <h2 id="book-title">Viewings</h2>
+
+      <div id="suggestion" class="suggestion" hidden>
+        <p class="eyebrow">Heard in the call</p>
+        <p id="suggestion-text"></p>
+        <div class="row">
+          <button id="suggestion-book" class="primary">Book it</button>
+          <button id="suggestion-dismiss" class="link">Dismiss</button>
+        </div>
+      </div>
+
+      <form id="book-form" class="book-form">
+        <label>Listing <select id="book-listing" required></select></label>
+        <label>Time <select id="book-slot" required></select></label>
+        <label>Name <input id="book-name" placeholder="Your name" autocomplete="name"></label>
+        <button type="submit" class="primary">Book viewing</button>
+        <p id="book-error" class="error" role="alert"></p>
+      </form>
+
+      <h3>Scheduled</h3>
+      <ul id="bookings" class="bookings"></ul>
+    </section>
+  </main>
+
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

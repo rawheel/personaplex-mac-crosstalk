@@ -1,0 +1,54 @@
+{
+  "agency": "Harbor Lane Realty",
+  "agent_name": "Maya Brooks",
+  "listings": [
+    {
+      "id": "maple",
+      "address": "42 Maple Street",
+      "keyword": "Maple",
+      "neighborhood": "Riverside",
+      "price": 485000,
+      "beds": 3,
+      "baths": 2,
+      "sqft": 1650,
+      "highlights": "renovated kitchen and a big backyard",
+      "slots": ["Saturday 10 AM", "Saturday 2 PM", "Sunday 11 AM"]
+    },
+    {
+      "id": "cedar",
+      "address": "18 Cedar Court",
+      "keyword": "Cedar",
+      "neighborhood": "Oak Hill",
+      "price": 629000,
+      "beds": 4,
+      "baths": 3,
+      "sqft": 2300,
+      "highlights": "home office and a two car garage",
+      "slots": ["Friday 5 PM", "Saturday 11 AM", "Sunday 3 PM"]
+    },
+    {
+      "id": "harbor",
+      "address": "7 Harbor View, unit 12",
+      "keyword": "Harbor",
+      "neighborhood": "Downtown",
+      "price": 359000,
+      "beds": 2,
+      "baths": 1,
+      "sqft": 980,
+      "highlights": "water views and a gym in the building",
+      "slots": ["Thursday 6 PM", "Saturday 1 PM", "Sunday 10 AM"]
+    },
+    {
+      "id": "willow",
+      "address": "230 Willow Lane",
+      "keyword": "Willow",
+      "neighborhood": "Greenfield",
+      "price": 742000,
+      "beds": 5,
+      "baths": 3,
+      "sqft": 3100,
+      "highlights": "pool and a finished basement",
+      "slots": ["Saturday 3 PM", "Sunday 1 PM"]
+    }
+  ]
+}
