@@ -1,11 +1,14 @@
 # personaplex-mac-crosstalk
 
-Full-duplex voice agents that run entirely on your Mac. The agent listens and talks at
-the same time: you can interrupt it, it backchannels ("mm-hm", "got it"), and it never
-waits for a "turn". It runs NVIDIA's [PersonaPlex](https://github.com/NVIDIA/personaplex)
-7B speech-to-speech model on Apple Silicon with [MLX](https://github.com/ml-explore/mlx).
+Run NVIDIA's [PersonaPlex](https://github.com/NVIDIA/personaplex) on your Mac: a full-duplex
+voice agent that listens and talks at the same time. You can interrupt it, it backchannels
+("mm-hm", "got it"), and it never waits for a "turn". Everything runs locally on Apple
+Silicon with [MLX](https://github.com/ml-explore/mlx); no GPU server, no API key.
 
-Two demo agents come with it, picked with the switch at the top of the page:
+This is an unofficial community project, not affiliated with or endorsed by NVIDIA.
+
+Two demo agents come with it, picked with the switch at the top of the page (the agency,
+its listings and the people are made up):
 
 - **Real estate agent**: Maya from Harbor Lane Realty. Browse the listings, call her, and
   book viewings.
@@ -155,6 +158,35 @@ that voice.
 - English only. No echo cancellation beyond what the browser provides: use headphones.
   Through speakers, the agent can hear itself, and its voice can end up in your side of
   the chat.
+
+## Troubleshooting
+
+- **`huggingface-cli: command not found`**: use `uvx --from huggingface_hub hf auth login`,
+  which needs nothing installed.
+- **401 or 403 while downloading**: open the
+  [model page](https://huggingface.co/nvidia/personaplex-7b-v1) while logged in and accept
+  the license. A fine-grained token also needs "Read access to contents of all public gated
+  repos you can access".
+- **Not enough disk**: the conversion needs the 16.7 GB original and the 5.2 GB result at
+  once. `--delete-original` removes the original afterwards.
+- **"Microphone blocked"**: allow the microphone for localhost in the browser, and for the
+  browser in System Settings > Privacy & Security > Microphone.
+- **Choppy audio, or "over budget" in the server log**: each 80 ms frame must be computed
+  in under 80 ms. Close other apps using the GPU and check `crosstalk-bench speed`.
+- **The agent talks to itself**: it hears its own voice through your speakers. Use
+  headphones.
+
+## Security and privacy
+
+- Calls, transcripts and recordings stay on your Mac. The only network traffic is the
+  one-time model downloads from Hugging Face.
+- The server listens on localhost only. Other websites can send requests to localhost, so
+  the server refuses requests from any other origin and from foreign host names (DNS
+  rebinding).
+- There is no login. If you start it with `--host` set to a network address, anyone who can
+  reach that address can talk to the agent, listen to your recordings and read bookings.
+- Recordings (`~/.cache/crosstalk/recordings`) and bookings are plain files. Untick "Save a
+  recording of the call" to skip recording.
 
 ## Credits and licenses
 
