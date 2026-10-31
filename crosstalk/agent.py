@@ -18,23 +18,30 @@ def _price(value: int) -> str:
     return f"${value:,}"
 
 
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def build_prompt(listings: dict, booked: set[tuple[str, str]]) -> str:
     """Role prompt in the style PersonaPlex was trained on ("You work for X which is a Y
     and your name is Z. Information: ..."). Booked slots are left out so the agent only
-    offers times that are still free. Kept short: long prompts make the persona drift."""
+    offers times that are still free.
+
+    Each home's short name ("Cedar Court") is repeated in front of its viewing times. In
+    test calls this cut the agent's mix-ups between homes and made it name the home when
+    confirming, which the UI needs to offer the booking."""
     parts = []
     for item in listings["listings"]:
-        free = [s for s in item["slots"] if (item["id"], s) not in booked]
-        times = " or ".join(free) if free else "no viewing times left this week"
+        free = [s.replace(" ", " at ", 1) for s in item["slots"] if (item["id"], s) not in booked]
         parts.append(
-            f"{item['address']} in {item['neighborhood']}, {item['beds']} bed {item['baths']} bath, "
-            f"{_price(item['price'])}, {item['highlights']}, viewings {times}."
+            f"{item['name']}: {item['address']}, {_count(item['beds'], 'bedroom')}, "
+            f"{_count(item['baths'], 'bathroom')}, {_price(item['price'])}, {item['highlights']}. "
+            f"{item['name']} viewings: {', '.join(free) if free else 'none left this week'}."
         )
     return (
         f"You work for {listings['agency']} which is a real estate agency and your name is "
         f"{listings['agent_name']}. Information: You help callers find a home and book a viewing. "
-        f"Listings: {' '.join(parts)} To book, confirm the address, day and time, and ask for "
-        f"the caller's name."
+        f"{' '.join(parts)} Only offer the viewing times listed for that home."
     )
 
 

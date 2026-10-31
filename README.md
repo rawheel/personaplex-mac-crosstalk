@@ -8,13 +8,25 @@ waits for a "turn". It runs NVIDIA's [PersonaPlex](https://github.com/NVIDIA/per
 The bundled demo is a real estate sales agent: browse the listings, call the agent, and
 book viewings.
 
-<!-- BENCHMARKS -->
+## Speed
+
+Each step produces 80 ms of audio, so a step must take under 80 ms to keep up in real
+time. On a MacBook Pro M4 Pro (24 GB), measured with `crosstalk-bench speed`:
+
+| Weights | Per 80 ms frame | Peak memory | Call start (prompt of ~290 tokens) |
+|---|---|---|---|
+| 4-bit (default) | 26 ms (p90 26.4, max 30.4) | 7.2 GB | 1.1 s |
+| 8-bit | 38 ms | 10.3 GB | 1.7 s |
+
+Processing the system prompt one frame at a time, as NVIDIA's server does, takes 6.7 s
+(4-bit) and 8.2 s (8-bit). The 8-bit row was measured with random weights of the same
+shapes, which run at the same speed.
 
 ## Requirements
 
 - Apple Silicon Mac with 16 GB+ of memory (tested on an M4 Pro with 24 GB)
 - Python 3.12 and [uv](https://docs.astral.sh/uv/)
-- About 22 GB of free disk for the one-time conversion (5 GB afterwards)
+- About 23 GB of free disk for the one-time conversion (6 GB afterwards)
 - A Hugging Face account that has accepted the
   [PersonaPlex license](https://huggingface.co/nvidia/personaplex-7b-v1)
 
@@ -30,7 +42,7 @@ uvx --from huggingface_hub hf auth login      # paste a read token
 ```
 
 `crosstalk-convert` downloads NVIDIA's 16.7 GB checkpoint once, converts it to a 4-bit MLX
-model (about 4.5 GB in `~/.cache/crosstalk`) and converts the 16 voices. With
+model (5.2 GB in `~/.cache/crosstalk`) and converts the 18 voices. With
 `--delete-original` it then removes the PyTorch checkpoint. Use `--bits 8` for higher
 quality if your Mac is fast enough (see `crosstalk-bench speed`).
 
@@ -43,12 +55,13 @@ quality if your Mac is fast enough (see `crosstalk-bench speed`).
 Open http://localhost:8998, put on headphones and press **Start call**.
 
 - **Listings** come from `crosstalk/data/listings.json`. Edit it to use your own homes,
-  prices and viewing times. The agent's role prompt is generated from it.
+  prices and viewing times. The agent's role prompt is generated from it; `name` is how
+  the agent refers to a home and `keyword` is what the UI listens for.
 - **Booking**: when the agent confirms an address and a time, a "Heard in the call" card
   offers to book it. You can also book with the form. Booked times are taken out of the
   agent's prompt for the next call, so it only offers free slots. Bookings are stored in
   `~/.cache/crosstalk/bookings.json`.
-- **Voice and prompt**: pick one of 16 voices and edit the prompt under "Voice and prompt".
+- **Voice and prompt**: pick one of 18 voices and edit the prompt under "Voice and prompt".
 
 ## API
 
@@ -87,12 +100,21 @@ conversation runs at a time. Connections from other websites are refused.
 .venv/bin/crosstalk-bench offline in.wav out.wav --prompt "You enjoy having a good conversation."
 ```
 
+`offline` runs a recorded caller through the agent and writes the agent's audio plus
+`out.json` with its words and when it said them, which is handy for testing prompts.
+
 ## Limitations
 
 - PersonaPlex can't call tools or look things up. It only knows what's in its prompt, and
   bookings are recorded by the UI, not by the model.
-- English only. Long prompts make the persona drift, so keep listings short.
-- No echo cancellation beyond what the browser provides: use headphones.
+- It gets details wrong sometimes. In 15 scripted test calls it quoted prices and
+  described the homes reliably, but it now and then offered another home's viewing time
+  or confirmed a time without naming the home. The UI only offers to book times that
+  really exist for the home it heard, so a mix-up can't create an impossible booking.
+  Keep the listing count small: four homes is already a lot for a 7B model.
+- The on-screen transcript is the model's own text stream, one token per 80 ms, so
+  contractions sometimes come out garbled ("you' all set"). The audio is unaffected.
+- English only. No echo cancellation beyond what the browser provides: use headphones.
 
 ## Credits and licenses
 

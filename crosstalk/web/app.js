@@ -155,7 +155,7 @@ function detectBooking(text) {
       if (!DAYS.includes(day)) continue;
       // The day and the hour must be said together ("Sunday at eleven", "10 AM on
       // Saturday"); the latest such mention wins, so a confirmation beats a list of options.
-      const time = `\\b(${hour}|${HOUR_WORDS[Number(hour)]})(:00)?\\b(\\s*(${ampm}|${ampm[0]}\\.?\\s*m\\.?|o'?clock))?`;
+      const time = `\\b(${hour}|${HOUR_WORDS[Number(hour)]})(:00)?\\b(\\s*(${ampm}|${ampm[0]}\\.?\\s*m\\.?|o[’']?clock))?`;
       const near = "[^.?!]{0,25}?";
       const re = new RegExp(`\\b${day}\\b${near}${time}|${time}${near}\\b${day}\\b`, "g");
       let score = -1;

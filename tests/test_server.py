@@ -95,7 +95,8 @@ async def main():
             r = await client.post("/api/bookings", json={"listing_id": "maple", "slot": "Saturday 10 AM", "name": "Bo"})
             assert r.status == 400  # double booking refused
             cfg = await (await client.get("/api/config")).json()
-            assert "Saturday 10 AM" not in cfg["prompt"].split("42 Maple Street")[1].split(".")[0]
+            maple_times = cfg["prompt"].split("Maple Street viewings: ")[1].split(".")[0]
+            assert maple_times == "Saturday at 2 PM, Sunday at 11 AM", maple_times
             listings = await (await client.get("/api/listings")).json()
             assert "Saturday 10 AM" not in listings["listings"][0]["free_slots"]
             assert (await client.delete(f"/api/bookings/{booking['id']}")).status == 200

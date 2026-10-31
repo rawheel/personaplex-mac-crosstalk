@@ -4,6 +4,7 @@
   "listings": [
     {
       "id": "maple",
+      "name": "Maple Street",
       "address": "42 Maple Street",
       "keyword": "Maple",
       "neighborhood": "Riverside",
@@ -16,6 +17,7 @@
     },
     {
       "id": "cedar",
+      "name": "Cedar Court",
       "address": "18 Cedar Court",
       "keyword": "Cedar",
       "neighborhood": "Oak Hill",
@@ -28,6 +30,7 @@
     },
     {
       "id": "harbor",
+      "name": "Harbor View",
       "address": "7 Harbor View, unit 12",
       "keyword": "Harbor",
       "neighborhood": "Downtown",
@@ -40,6 +43,7 @@
     },
     {
       "id": "willow",
+      "name": "Willow Lane",
       "address": "230 Willow Lane",
       "keyword": "Willow",
       "neighborhood": "Greenfield",

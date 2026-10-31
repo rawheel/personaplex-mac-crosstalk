@@ -1,6 +1,6 @@
 """One-time conversion of NVIDIA's PersonaPlex checkpoint into a quantized MLX model.
 
-The PyTorch checkpoint is 16.7 GB. Converting it once to 4-bit MLX weights (~4.5 GB) means
+The PyTorch checkpoint is 16.7 GB. Converting it once to 4-bit MLX weights (5.2 GB) means
 every later start loads a file a quarter of the size, and the original can be deleted.
 Voice prompts are converted from PyTorch archives to safetensors at the same time, so the
 runtime never needs PyTorch or pickle.
@@ -187,6 +187,15 @@ def _delete_cached_checkpoint() -> None:
             for f in rev.files:
                 if f.file_name == CHECKPOINT:
                     size = f.size_on_disk / 1e9
+                    # Newer caches make blobs/<hash> a link into a shared store; delete the
+                    # real file too unless another repo still refers to it.
+                    data = f.blob_path.resolve()
+                    refs = data.with_name(data.name + ".refs")
+                    users = refs.read_text().split() if refs.exists() else []
+                    shared = any(not u.startswith(f"{repo.repo_path.name}/") for u in users)
+                    if data != f.blob_path and not shared:
+                        for p in (data, refs, data.with_name(data.name + ".lock")):
+                            p.unlink(missing_ok=True)
                     f.blob_path.unlink(missing_ok=True)
                     f.file_path.unlink(missing_ok=True)
                     print(f"deleted cached {CHECKPOINT} ({size:.1f} GB)")

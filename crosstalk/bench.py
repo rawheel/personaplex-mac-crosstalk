@@ -81,7 +81,7 @@ def offline(engine: Engine, args):
     mimi = rustymimi.Tokenizer(engine.mimi_path, num_codebooks=8)
     frames = len(pcm) // FRAME_SIZE
     codes = mimi.encode_step(pcm[None, None, : frames * FRAME_SIZE])  # [1, 8, frames]
-    out_codes, text = [], []
+    out_codes, text, words = [], [], []  # words: (seconds into the input, piece)
     t0 = time.perf_counter()
     for i in range(codes.shape[-1]):
         out = gen.step(codes[0, :, i].astype(np.int64))
@@ -91,11 +91,12 @@ def offline(engine: Engine, args):
         piece = engine.text_piece(int(out[0]))
         if piece:
             text.append(piece)
+            words.append((round(i * FRAME_SIZE / SAMPLE_RATE, 2), piece))
     elapsed = time.perf_counter() - t0
     audio = mimi.decode_step(np.stack(out_codes, axis=-1)[None].astype(np.uint32))
     sphn.write_wav(args.output, audio[0, 0], SAMPLE_RATE)
     transcript = "".join(text).strip()
-    Path(args.output).with_suffix(".json").write_text(json.dumps({"text": transcript}))
+    Path(args.output).with_suffix(".json").write_text(json.dumps({"text": transcript, "words": words}))
     print(f"{frames} frames in {elapsed:.1f}s ({elapsed / frames * 1000:.1f} ms/frame)")
     print(f"agent said: {transcript}")
 

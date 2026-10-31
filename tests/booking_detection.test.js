@@ -18,6 +18,9 @@ const cases = [
   ["Maple has Saturday at 2 or Sunday at 11. Okay, Sunday at eleven it is.", "maple|Sunday 11 AM"],
   ["I can book 18 Cedar Court at 5 PM on Friday for you.", "cedar|Friday 5 PM"],
   ["Harbor View is 359,000. It has a gym.", null],
+  ["Sam, you're all set for the 11 o’clock viewing on Saturday at 18 Cedar Court.", "cedar|Saturday 11 AM"],
+  // Real transcript: the model mixed up listings; Willow has no Saturday 11 slot.
+  ["Sam, you allre set for the 11 o’clock viewing on Saturday with 23 Willow Lane.", null],
 ];
 let failed = 0;
 for (const [text, want] of cases) {
