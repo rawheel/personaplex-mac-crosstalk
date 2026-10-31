@@ -38,9 +38,10 @@ def load_model(name: str = "small.en"):
 
 class CallerTranscriber:
     """Feed it the caller's audio as it arrives. It calls emit() from its own threads with
-        {"type": "caller_start", "id": n}           when the caller starts talking
+        {"type": "caller_start", "id": n, "at": s}  when the caller starts talking
         {"type": "caller_text", "id": n, "text": t} when that utterance is transcribed
-    The text is empty when the sound turned out not to be speech."""
+    `at` is in seconds of caller audio fed so far. The text is empty when the sound turned
+    out not to be speech."""
 
     def __init__(self, model, emit: Callable[[dict], None], log: Callable[[str], None] = print):
         self.model = model
@@ -73,10 +74,12 @@ class CallerTranscriber:
         utterance: list[np.ndarray] | None = None
         quiet = 0
         next_id = 1
+        windows = 0  # 20 ms windows seen, the clock for `at`
         while (chunk := self.audio.get()) is not None:
             pending = np.concatenate([pending, chunk.astype(np.float32, copy=False)])
             while len(pending) >= WINDOW:
                 win, pending = pending[:WINDOW], pending[WINDOW:]
+                windows += 1
                 level = float(np.sqrt(np.mean(win**2)))
                 loud = level > max(MIN_LEVEL, 4 * noise)
                 if not loud:
@@ -86,10 +89,12 @@ class CallerTranscriber:
                     before.append(win)
                     recent.append(loud)
                     if sum(recent) >= START[0]:
+                        first_loud = windows - len(recent) + list(recent).index(True)
                         utterance, quiet, uid = list(before), 0, next_id
                         next_id += 1
                         recent.clear()
-                        self.emit({"type": "caller_start", "id": uid})
+                        at = first_loud * WINDOW / SAMPLE_RATE
+                        self.emit({"type": "caller_start", "id": uid, "at": round(at, 2)})
                     continue
 
                 utterance.append(win)

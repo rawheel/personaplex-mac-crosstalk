@@ -7,7 +7,7 @@ their web client and anything built against it work unchanged:
     server -> client  0x02 + utf-8 text    the agent's words as it speaks them
 Query parameters: text_prompt, voice_prompt (e.g. NATF2), seed, and codec=pcm to exchange
 raw 16-bit little-endian mono PCM at 24 kHz instead of Opus (used by the bundled UI).
-Without text_prompt, the real estate agent prompt is used.
+Without text_prompt, the prompt of `persona` is used (realestate, the default, or movies).
 
 With caller_transcript=1 the server also transcribes the caller and sends
     server -> client  0x03 + utf-8 JSON    {"type": "caller_start", "id": n} as they start
@@ -15,14 +15,21 @@ With caller_transcript=1 the server also transcribes the caller and sends
                                            "text": ...} once it's transcribed (empty if
                                            it wasn't speech)
 
-GET /api/voices/{voice}/preview returns a WAV of the agent greeting in that voice. The first
-request renders it with the model (a few seconds); after that it's served from disk.
+With record=1 the call is saved when it ends: both sides mixed into one Ogg/Opus file plus
+the conversation as text. GET /api/recordings lists them (newest first; wait=1 first waits
+for a call that's ending to be saved), GET /api/recordings/{id}/audio plays one, DELETE
+/api/recordings/{id} removes it.
+
+GET /api/voices/{voice}/preview?persona=... returns a WAV of that persona greeting in that
+voice. The first request renders it with the model (a few seconds); after that it's served
+from disk.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import collections
 import json
 import queue
 import threading
@@ -39,11 +46,16 @@ from aiohttp import web
 from .agent import Bookings, build_prompt, load_listings
 from .convert import DEFAULT_OUT
 from .engine import FRAME_SIZE, SAMPLE_RATE, Engine, set_seed
+from .movies import build_prompt as movies_prompt
+from .movies import load_movies
+from .movies import preview_prompt as movies_preview_prompt
 from .previews import PreviewCache, preview_prompt
+from .recordings import Recordings
 from .transcribe import CallerTranscriber, load_model
 
 WEB_DIR = Path(__file__).parent / "web"
 DEFAULT_VOICE = "NATF2"
+DEFAULT_PERSONA = "realestate"
 
 
 def log(msg: str):
@@ -54,11 +66,25 @@ class Session:
     """Runs one conversation. All Mimi and model work happens on a dedicated thread so
     the asyncio loop only shuffles bytes."""
 
-    def __init__(self, engine: Engine, voice: str, prompt: str, seed: int | None):
+    def __init__(
+        self,
+        engine: Engine,
+        voice: str,
+        prompt: str,
+        seed: int | None,
+        record: bool = False,
+        repeat_penalty: float = 0.0,
+    ):
         self.engine = engine
         self.voice = voice
         self.prompt = prompt
         self.seed = seed
+        self.record = record
+        self.repeat_penalty = repeat_penalty
+        # For recordings, on one clock: frame k is caller audio from k * 80 ms.
+        self.caller_audio: list[np.ndarray] = []
+        self.agent_audio: list[tuple[int, np.ndarray]] = []  # (frame it was produced at, pcm)
+        self.agent_words: list[tuple[float, str]] = []  # (seconds, piece)
         self.pcm_in: queue.Queue[np.ndarray | None] = queue.Queue()
         self.pcm_out: queue.Queue[np.ndarray] = queue.Queue()
         self.text_out: queue.Queue[str] = queue.Queue()
@@ -81,7 +107,7 @@ class Session:
     def _loop(self):
         engine = self.engine
         set_seed(self.seed)
-        gen = engine.generator()
+        gen = engine.generator(repeat_penalty=self.repeat_penalty)
         t0 = time.time()
         gen.system_prompts(engine.voice(self.voice), engine.encode_prompt(self.prompt))
         log(f"system prompts done in {time.time() - t0:.2f}s")
@@ -89,7 +115,8 @@ class Session:
         self.ready.set()
 
         pending = np.zeros(0, dtype=np.float32)
-        encoding = decoding = 0  # frames handed to Mimi's worker threads, not yet returned
+        encoding = 0  # frames handed to Mimi's encoder thread, not yet returned
+        decoding = collections.deque()  # same for its decoder: the frame each was produced at
         while not self.stop.is_set():
             idle = True
             try:
@@ -98,9 +125,11 @@ class Session:
                     break
                 pending = np.concatenate([pending, chunk])
                 while pending.shape[-1] >= FRAME_SIZE:
-                    mimi.encode(pending[:FRAME_SIZE])
+                    frame, pending = pending[:FRAME_SIZE], pending[FRAME_SIZE:]
+                    mimi.encode(frame)
                     encoding += 1
-                    pending = pending[FRAME_SIZE:]
+                    if self.record:
+                        self.caller_audio.append(frame)
                 idle = False
             except queue.Empty:
                 pass
@@ -110,6 +139,7 @@ class Session:
                 encoding -= 1
                 idle = False
                 user = np.asarray(codes).reshape(8).astype(np.int64)  # [8, 1] per frame
+                k = self.stats["frames"]
                 t = time.perf_counter()
                 out = gen.step(user)
                 ms = (time.perf_counter() - t) * 1000
@@ -121,25 +151,29 @@ class Session:
                     piece = engine.text_piece(int(out[0]))
                     if piece:
                         self.text_out.put(piece)
+                        self.agent_words.append((round(k * FRAME_SIZE / SAMPLE_RATE, 2), piece))
                     mimi.decode(out[None, 1:].astype(np.uint32))  # [1, 8] -> 1920 samples
-                    decoding += 1
+                    decoding.append(k)
 
             decoded = mimi.get_decoded()
             if decoded is not None:
-                decoding -= 1
+                k = decoding.popleft()
                 idle = False
-                self.pcm_out.put(np.asarray(decoded, dtype=np.float32).reshape(-1))
+                pcm = np.asarray(decoded, dtype=np.float32).reshape(-1)
+                self.pcm_out.put(pcm)
+                if self.record:
+                    self.agent_audio.append((k, pcm))
             if idle:
                 time.sleep(0.002)
 
         # Collect the frames Mimi is still working on: dropping it mid-frame makes its
         # threads log "sending on a closed channel".
         deadline = time.time() + 1.0
-        while (encoding > 0 or decoding > 0) and time.time() < deadline:
+        while (encoding > 0 or decoding) and time.time() < deadline:
             if mimi.get_encoded() is not None:
                 encoding -= 1
             elif mimi.get_decoded() is not None:
-                decoding -= 1
+                decoding.popleft()
             else:
                 time.sleep(0.002)
 
@@ -152,23 +186,55 @@ class Session:
 
 
 class Server:
-    def __init__(self, engine: Engine, bookings: Bookings, previews: PreviewCache, whisper=None):
+    def __init__(
+        self, engine: Engine, bookings: Bookings, previews: PreviewCache, recordings: Recordings, whisper=None
+    ):
         self.engine = engine
         self.bookings = bookings
         self.previews = previews
+        self.recordings = recordings
         self.whisper = whisper  # transcribes the caller; None turns that off
         self.lock = asyncio.Lock()  # one user of the model at a time: a call or a preview
         self.in_call = False
 
-    def current_prompt(self) -> str:
-        return build_prompt(load_listings(), self.bookings.booked_slots())
+    def personas(self) -> dict[str, dict]:
+        """The agents the UI can call. Read fresh each time, so edits to the data files and
+        new bookings show up without a restart."""
+        listings, movies = load_listings(), load_movies()
+        maya = listings["agent_name"].split()[0]
+        return {
+            "realestate": {
+                "label": "Real estate agent",
+                "name": maya,
+                "title": listings["agency"],
+                "tagline": f"Talk to {maya}, our sales agent, and book a viewing",
+                "voice": DEFAULT_VOICE,
+                "prompt": build_prompt(listings, self.bookings.booked_slots()),
+                "preview_prompt": preview_prompt(listings),
+                "repeat_penalty": 0.0,  # confirming a booking repeats the time on purpose
+            },
+            "movies": {
+                "label": "Movie buff",
+                "name": movies["name"],
+                "title": movies["title"],
+                "tagline": movies["tagline"],
+                "voice": movies["voice"],
+                "prompt": movies_prompt(movies),
+                "preview_prompt": movies_preview_prompt(movies),
+                "repeat_penalty": movies["repeat_penalty"],
+                "topics": [{k: t[k] for k in ("title", "kind", "years", "note")} for t in movies["topics"]],
+            },
+        }
 
     async def config(self, _request):
+        personas = self.personas()
+        for p in personas.values():
+            del p["preview_prompt"], p["repeat_penalty"]
         return web.json_response(
             {
                 "voices": self.engine.voice_names(),
-                "default_voice": DEFAULT_VOICE,
-                "prompt": self.current_prompt(),
+                "personas": personas,
+                "default_persona": DEFAULT_PERSONA,
                 "busy": self.in_call,
                 "caller_transcript": self.whisper is not None,
             }
@@ -208,12 +274,20 @@ class Server:
         await ws.prepare(request)
 
         q = request.query
-        voice = q.get("voice_prompt", "") or DEFAULT_VOICE
+        persona_id = q.get("persona", DEFAULT_PERSONA)
+        persona = self.personas().get(persona_id)
+        if persona is None:
+            await ws.send_bytes(b"\x02" + f"[unknown persona {q['persona']}]".encode())
+            await ws.close()
+            return ws
+        voice = q.get("voice_prompt", "") or persona["voice"]
         voice = voice.removesuffix(".pt")
-        prompt = q.get("text_prompt", "") or self.current_prompt()
+        prompt = q.get("text_prompt", "") or persona["prompt"]
         seed = int(q["seed"]) if q.get("seed") else None
         use_pcm = q.get("codec") == "pcm"
         transcribe = q.get("caller_transcript") == "1" and self.whisper is not None
+        record = {"persona": persona_id, "agent": persona["name"]} if q.get("record") == "1" else None
+        repeat_penalty = persona["repeat_penalty"]
         if voice not in self.engine.voice_names():
             await ws.send_bytes(b"\x02" + f"[unknown voice {voice}]".encode())
             await ws.close()
@@ -228,7 +302,7 @@ class Server:
             return ws
         self.in_call = True
         try:
-            await self._converse(ws, voice, prompt, seed, use_pcm, transcribe)
+            await self._converse(ws, voice, prompt, seed, use_pcm, transcribe, record, repeat_penalty)
         finally:
             self.in_call = False
             self.lock.release()
@@ -238,7 +312,10 @@ class Server:
         voice = request.match_info["voice"]
         if voice not in self.engine.voice_names():
             return web.json_response({"error": f"unknown voice {voice}"}, status=404)
-        prompt = preview_prompt(load_listings())
+        persona = self.personas().get(request.query.get("persona", DEFAULT_PERSONA))
+        if persona is None:
+            return web.json_response({"error": "unknown persona"}, status=404)
+        prompt = persona["preview_prompt"]
         path = self.previews.path(voice, prompt)
         if not path.exists():
             if self.in_call:
@@ -268,9 +345,19 @@ class Server:
                 self.lock.release()
         return web.FileResponse(path, headers={"Content-Type": "audio/wav"})
 
-    async def _converse(self, ws, voice: str, prompt: str, seed: int | None, use_pcm: bool, transcribe: bool):
+    async def _converse(
+        self,
+        ws,
+        voice: str,
+        prompt: str,
+        seed: int | None,
+        use_pcm: bool,
+        transcribe: bool,
+        record: dict | None,
+        repeat_penalty: float,
+    ):
         log(f"conversation started (voice {voice}, codec {'pcm' if use_pcm else 'opus'})")
-        session = Session(self.engine, voice, prompt, seed)
+        session = Session(self.engine, voice, prompt, seed, record=record is not None, repeat_penalty=repeat_penalty)
         session.thread.start()
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, session.ready.wait)
@@ -283,10 +370,17 @@ class Server:
             await ws.close()
             return
         await ws.send_bytes(b"\x00")
+        started = time.time()
         opus_in = sphn.OpusStreamReader(SAMPLE_RATE)
         opus_out = sphn.OpusStreamWriter(SAMPLE_RATE)
-        caller_events: queue.Queue[dict] = queue.Queue()
-        caller = CallerTranscriber(self.whisper, caller_events.put, log) if transcribe else None
+        caller_events: queue.Queue[dict] = queue.Queue()  # for the client
+        caller_log: list[dict] = []  # for the recording, including what arrives after hang-up
+
+        def on_caller(event: dict):
+            caller_events.put(event)
+            caller_log.append(event)
+
+        caller = CallerTranscriber(self.whisper, on_caller, log) if transcribe else None
 
         async def recv():
             async for msg in ws:
@@ -337,13 +431,56 @@ class Server:
             log(f"conversation ended: {session.summary()}")
             if not ws.closed:
                 await ws.close()
+            if record:
+                await self._save_recording(session, started, voice, record, caller_log)
+
+    async def _save_recording(self, session: Session, started: float, voice: str, record: dict, caller_log: list):
+        try:
+            meta = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: self.recordings.save(
+                    started=started,
+                    voice=voice,
+                    caller_audio=session.caller_audio,
+                    agent_audio=session.agent_audio,
+                    agent_words=session.agent_words,
+                    caller_events=caller_log,
+                    **record,
+                ),
+            )
+        except Exception as e:  # never lose the server over a recording
+            log(f"could not save the recording: {type(e).__name__}: {e}")
+            return
+        if meta:
+            log(f"saved recording {meta['id']} ({meta['duration']:.0f}s, {len(meta['messages'])} turns)")
+
+    async def list_recordings(self, request):
+        # Right after hanging up, the call may still be saving; wait for it if asked.
+        if request.query.get("wait") == "1":
+            deadline = time.time() + 15
+            while self.in_call and time.time() < deadline:
+                await asyncio.sleep(0.1)
+        return web.json_response(self.recordings.all())
+
+    async def recording_audio(self, request):
+        path = self.recordings.audio(request.match_info["id"])
+        if path is None:
+            return web.json_response({"error": "not found"}, status=404)
+        return web.FileResponse(path, headers={"Content-Type": "audio/ogg"})
+
+    async def delete_recording(self, request):
+        if not self.recordings.delete(request.match_info["id"]):
+            return web.json_response({"error": "not found"}, status=404)
+        return web.json_response({"ok": True})
 
     async def index(self, _request):
         return web.FileResponse(WEB_DIR / "index.html")
 
 
-def make_app(engine: Engine, bookings: Bookings, previews: PreviewCache, whisper=None) -> web.Application:
-    server = Server(engine, bookings, previews, whisper)
+def make_app(
+    engine: Engine, bookings: Bookings, previews: PreviewCache, recordings: Recordings, whisper=None
+) -> web.Application:
+    server = Server(engine, bookings, previews, recordings, whisper)
     app = web.Application()
     app.router.add_get("/", server.index)
     app.router.add_get("/api/config", server.config)
@@ -353,6 +490,9 @@ def make_app(engine: Engine, bookings: Bookings, previews: PreviewCache, whisper
     app.router.add_delete("/api/bookings/{id}", server.delete_booking)
     app.router.add_get("/api/chat", server.chat)
     app.router.add_get("/api/voices/{voice}/preview", server.voice_preview)
+    app.router.add_get("/api/recordings", server.list_recordings)
+    app.router.add_get("/api/recordings/{id}/audio", server.recording_audio)
+    app.router.add_delete("/api/recordings/{id}", server.delete_recording)
     app.router.add_static("/static", WEB_DIR)
     return app
 
@@ -364,6 +504,7 @@ def main():
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=8998)
     parser.add_argument("--bookings", type=Path, default=DEFAULT_OUT.parent / "bookings.json")
+    parser.add_argument("--recordings", type=Path, default=DEFAULT_OUT.parent / "recordings")
     parser.add_argument(
         "--whisper", default="small.en", help="Whisper model that transcribes the caller (e.g. base.en, small.en)"
     )
@@ -378,7 +519,9 @@ def main():
         t0 = time.time()
         whisper = load_model(args.whisper)  # downloaded on first use (small.en is about 480 MB)
         log(f"caller transcription: whisper {args.whisper}, loaded in {time.time() - t0:.1f}s")
-    app = make_app(engine, Bookings(args.bookings), PreviewCache(args.model_dir / "previews"), whisper)
+    app = make_app(
+        engine, Bookings(args.bookings), PreviewCache(args.model_dir / "previews"), Recordings(args.recordings), whisper
+    )
     log(f"open http://{args.host}:{args.port}")
     web.run_app(app, host=args.host, port=args.port, print=None)
 

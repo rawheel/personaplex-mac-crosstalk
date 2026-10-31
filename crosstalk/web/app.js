@@ -1,9 +1,13 @@
-// Real estate voice agent UI: listings, a full-duplex call, and viewing bookings.
+// Voice agent UI: a full-duplex call with one of several agents (personas), plus listings
+// and viewing bookings for the real estate agent.
 
 const $ = (id) => document.getElementById(id);
 const state = {
+  personas: {}, // from /api/config: label, name, title, tagline, voice, prompt (+ topics)
+  persona: null,
+  drafts: {}, // prompts the user edited, per persona
+  voices: [],
   listings: null,
-  defaultPrompt: "",
   call: null, // { ws, ctx, stream, capture, playback }
   transcript: "", // everything the agent said, for spotting bookings
   chat: { log: [], callers: new Map(), lastAgentAt: 0 }, // conversation bubbles
@@ -40,6 +44,81 @@ async function api(path, options = {}) {
   return body;
 }
 
+// --- personas ---
+
+const REAL_ESTATE = "realestate";
+
+function initials(title) {
+  return title.split(/\s+/).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+}
+
+function renderPersonaSwitch() {
+  $("personas").replaceChildren(
+    ...Object.entries(state.personas).map(([id, p]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.persona = id;
+      b.textContent = p.label;
+      b.onclick = () => selectPersona(id);
+      return b;
+    }),
+  );
+}
+
+function selectPersona(id) {
+  if (state.call || !state.personas[id]) return;
+  const box = $("prompt");
+  if (state.persona) {
+    // Keep an edited prompt for when the user switches back.
+    if (box.value !== state.personas[state.persona].prompt) state.drafts[state.persona] = box.value;
+    else delete state.drafts[state.persona];
+  }
+  stopPreview();
+  state.persona = id;
+  localStorage.setItem("persona", id);
+  const p = state.personas[id];
+  box.value = state.drafts[id] ?? p.prompt;
+  const saved = localStorage.getItem(`voice:${id}`);
+  state.voice = state.voices.includes(saved) ? saved : p.voice;
+  $("suggestion").hidden = true;
+  renderPersona();
+}
+
+function renderPersona() {
+  const p = state.personas[state.persona];
+  const realEstate = state.persona === REAL_ESTATE;
+  document.title = `${p.title} · Voice agent`;
+  $("title").textContent = p.title;
+  $("tagline").textContent = p.tagline;
+  $("logo").textContent = initials(p.title);
+  $("agent-label").textContent = p.name;
+  $("listings-panel").hidden = !realEstate;
+  $("viewings-panel").hidden = !realEstate;
+  $("topics-panel").hidden = realEstate;
+  $("main").classList.toggle("no-side", !realEstate);
+  $("prompt-hint").textContent = realEstate
+    ? "(built from the listings and free viewing times; edits apply to the next call)"
+    : "(edits apply to the next call)";
+  if (p.topics) renderTopics(p);
+  for (const b of $("personas").children) b.setAttribute("aria-pressed", String(b.dataset.persona === state.persona));
+  markVoices();
+}
+
+function renderTopics(p) {
+  $("topics-title").textContent = `${p.name}'s favorites`;
+  $("topics").replaceChildren(
+    ...p.topics.map((t) => {
+      const card = document.createElement("article");
+      card.className = "listing";
+      card.innerHTML = `<div class="top"><span class="addr"></span><span class="kind"></span></div><p class="hl"></p>`;
+      card.querySelector(".addr").textContent = t.title;
+      card.querySelector(".kind").textContent = [t.kind, t.years].filter(Boolean).join(" · ");
+      card.querySelector(".hl").textContent = t.note;
+      return card;
+    }),
+  );
+}
+
 // --- listings and bookings ---
 
 function money(n) {
@@ -47,10 +126,7 @@ function money(n) {
 }
 
 function renderListings() {
-  const { listings, agency, agent_name } = state.listings;
-  $("agency").textContent = agency;
-  $("agent-name").textContent = agent_name.split(" ")[0];
-  $("agent-label").textContent = agent_name.split(" ")[0];
+  const { listings } = state.listings;
   $("listings").replaceChildren(
     ...listings.map((l) => {
       const card = document.createElement("article");
@@ -122,12 +198,15 @@ async function refreshBookings() {
   );
 }
 
+// Prompts change when bookings do (booked times leave the real estate prompt). An edited
+// prompt is left alone unless force is set.
 async function refreshPrompt({ force = false } = {}) {
   const config = await api("/api/config");
-  const promptBox = $("prompt");
-  const untouched = promptBox.value === state.defaultPrompt;
-  state.defaultPrompt = config.prompt;
-  if (force || untouched) promptBox.value = config.prompt;
+  const box = $("prompt");
+  const untouched = box.value === state.personas[state.persona]?.prompt;
+  state.personas = config.personas;
+  if (force) delete state.drafts[state.persona];
+  if (force || untouched) box.value = state.personas[state.persona].prompt;
   return config;
 }
 
@@ -182,6 +261,7 @@ function detectBooking(text) {
 }
 
 function updateSuggestion() {
+  if (state.persona !== REAL_ESTATE) return;
   const match = detectBooking(state.transcript);
   const box = $("suggestion");
   if (!match) return;
@@ -255,20 +335,23 @@ async function pickVoice(name) {
   const wasPlaying = p.playing === name;
   stopPreview();
   state.voice = name;
-  localStorage.setItem("voice", name);
+  localStorage.setItem(`voice:${state.persona}`, name);
   $("voice-error").textContent = "";
   markVoices();
   if (wasPlaying || state.call) return; // no previews over a live call
 
-  let url = p.urls.get(name);
+  // Each persona greets differently, so previews are per persona and voice.
+  const persona = state.persona;
+  const key = `${persona}|${name}`;
+  let url = p.urls.get(key);
   if (!url) {
     p.loading = name;
     markVoices();
     try {
-      const res = await fetch(`/api/voices/${encodeURIComponent(name)}/preview`);
+      const res = await fetch(`/api/voices/${encodeURIComponent(name)}/preview?persona=${encodeURIComponent(persona)}`);
       if (!res.ok) throw new Error((await res.json()).error || res.statusText);
       url = URL.createObjectURL(await res.blob());
-      p.urls.set(name, url);
+      p.urls.set(key, url);
     } catch (e) {
       $("voice-error").textContent = `No preview for ${name}: ${e.message}`;
       return;
@@ -276,7 +359,7 @@ async function pickVoice(name) {
       if (p.loading === name) p.loading = null;
       markVoices();
     }
-    if (state.voice !== name || state.call) return; // moved on while it was being prepared
+    if (state.voice !== name || state.persona !== persona || state.call) return; // moved on meanwhile
   }
   const audio = new Audio(url);
   p.audio = audio;
@@ -300,7 +383,7 @@ async function pickVoice(name) {
 const AGENT_PAUSE_MS = 2000;
 
 function agentName() {
-  return state.listings ? state.listings.agent_name.split(" ")[0] : "Agent";
+  return state.personas[state.persona]?.name ?? "Agent";
 }
 
 // Keeps the newest message in view, unless the user has scrolled up to read.
@@ -331,13 +414,26 @@ function setText(entry, text) {
   entry.body.textContent = text.trimStart();
 }
 
+// The agent's latest bubble in this call, even if the caller has spoken since.
+function lastAgentBubble() {
+  for (let i = state.chat.log.length - 1; i >= 0; i--) {
+    const entry = state.chat.log[i];
+    if (entry.who === "agent") return entry;
+    if (entry.who === "divider") return null;
+  }
+  return null;
+}
+
 function addAgentWords(piece) {
   state.transcript += piece;
   const chat = state.chat;
   const now = performance.now();
   const last = chat.log.at(-1);
+  const previous = lastAgentBubble();
   keepScrolled(() => {
-    if (last?.who === "agent" && now - chat.lastAgentAt < AGENT_PAUSE_MS) setText(last, last.text + piece);
+    // A piece that doesn't start a word ("?", "'s") finishes the agent's last word.
+    if (!/^\s/.test(piece) && previous) setText(previous, previous.text + piece);
+    else if (last?.who === "agent" && now - chat.lastAgentAt < AGENT_PAUSE_MS) setText(last, last.text + piece);
     else addBubble("agent", piece);
   });
   chat.lastAgentAt = now;
@@ -391,6 +487,80 @@ function clearConversation() {
   $("transcript").replaceChildren();
 }
 
+// --- recordings ---
+
+function clock(seconds) {
+  const s = Math.round(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+// wait: right after a call, let the server finish saving it first.
+async function refreshRecordings({ wait = false } = {}) {
+  const recordings = await api(`/api/recordings${wait ? "?wait=1" : ""}`);
+  $("recordings").replaceChildren(...recordings.map(renderRecording));
+}
+
+function renderRecording(r) {
+  const li = document.createElement("li");
+  li.className = "recording";
+  li.innerHTML = `
+    <div class="rec-head">
+      <div><div class="rec-title"></div><div class="rec-meta"></div></div>
+      <div class="rec-actions"><a class="link">Download</a><button type="button" class="link danger">Delete</button></div>
+    </div>
+    <audio controls preload="metadata"></audio>
+    <details><summary></summary><div class="rec-chat"></div></details>`;
+  const when = new Date(r.started * 1000).toLocaleString([], {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+  li.querySelector(".rec-title").textContent = `Call with ${r.agent}`;
+  li.querySelector(".rec-meta").textContent =
+    [state.personas[r.persona]?.label, when, clock(r.duration), r.voice].filter(Boolean).join(" · ");
+  const url = `/api/recordings/${r.id}/audio`;
+  const audio = li.querySelector("audio");
+  audio.src = url;
+  const download = li.querySelector("a");
+  download.href = url;
+  download.download = `call-${r.id}.ogg`;
+
+  li.querySelector("summary").textContent = r.messages.length
+    ? `Conversation (${r.messages.length} turns)`
+    : "No words were transcribed";
+  li.querySelector(".rec-chat").append(
+    ...r.messages.map((m) => {
+      const turn = document.createElement("button"); // click a turn to play from there
+      turn.type = "button";
+      turn.className = `msg ${m.who === "agent" ? "agent" : "caller"}`;
+      turn.title = "Play from here";
+      turn.innerHTML = `<span class="who"></span><p></p>`;
+      turn.querySelector(".who").textContent = `${m.who === "agent" ? r.agent : "You"} · ${clock(m.at)}`;
+      turn.querySelector("p").textContent = m.text;
+      turn.onclick = () => {
+        audio.currentTime = m.at;
+        audio.play();
+      };
+      return turn;
+    }),
+  );
+
+  // Deleting takes two clicks.
+  const del = li.querySelector(".danger");
+  del.onclick = async () => {
+    if (!del.classList.contains("confirm")) {
+      del.classList.add("confirm");
+      del.textContent = "Click again to delete";
+      setTimeout(() => {
+        del.classList.remove("confirm");
+        del.textContent = "Delete";
+      }, 4000);
+      return;
+    }
+    await api(`/api/recordings/${r.id}`, { method: "DELETE" });
+    await refreshRecordings();
+  };
+  return li;
+}
+
 // --- the call ---
 
 function setCallUi(mode) {
@@ -399,6 +569,7 @@ function setCallUi(mode) {
   btn.classList.toggle("connecting", mode === "connecting");
   $("call-label").textContent =
     mode === "live" ? "End call" : mode === "connecting" ? "Connecting…" : "Start call";
+  for (const b of $("personas").children) b.disabled = mode !== "idle"; // one agent per call
 }
 
 async function startCall() {
@@ -427,10 +598,12 @@ async function startCall() {
 
   const params = new URLSearchParams({
     codec: "pcm",
+    persona: state.persona,
     voice_prompt: state.voice,
     text_prompt: $("prompt").value,
   });
   if (state.callerTranscript) params.set("caller_transcript", "1");
+  if ($("record").checked) params.set("record", "1");
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/api/chat?${params}`);
   ws.binaryType = "arraybuffer";
@@ -491,20 +664,24 @@ function endCall(closeSocket = true) {
   setCallUi("idle");
   if (!$("status").classList.contains("error")) setStatus("Ready");
   state.transcript += "\n\n";
-  addDivider("Call ended");
+  addDivider(`Call with ${agentName()} ended`);
   refreshAll();
+  refreshRecordings({ wait: true });
 }
 
 // --- wiring ---
 
 async function init() {
   try {
-    const config = await refreshPrompt({ force: true });
-    const saved = localStorage.getItem("voice");
-    state.voice = config.voices.includes(saved) ? saved : config.default_voice;
+    const config = await api("/api/config");
+    state.personas = config.personas;
+    state.voices = config.voices;
     state.callerTranscript = config.caller_transcript;
+    renderPersonaSwitch();
     renderVoices(config.voices);
-    await Promise.all([refreshListings(), refreshBookings()]);
+    const saved = localStorage.getItem("persona");
+    selectPersona(config.personas[saved] ? saved : config.default_persona);
+    await Promise.all([refreshListings(), refreshBookings(), refreshRecordings()]);
     $("call-btn").disabled = false;
     setStatus(config.busy ? "Busy in another tab" : "Ready");
   } catch (e) {
@@ -529,6 +706,8 @@ async function init() {
   };
   $("clear-transcript").onclick = clearConversation;
   $("reset-prompt").onclick = () => refreshPrompt({ force: true });
+  $("record").checked = localStorage.getItem("record") !== "0";
+  $("record").onchange = () => localStorage.setItem("record", $("record").checked ? "1" : "0");
 }
 
 init();

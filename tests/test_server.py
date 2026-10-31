@@ -28,6 +28,7 @@ from crosstalk.agent import Bookings  # noqa: E402
 from crosstalk.convert import HF_REPO, MIMI, TEXT_TOKENIZER  # noqa: E402
 from crosstalk.engine import Engine, Generator  # noqa: E402
 from crosstalk.previews import PreviewCache  # noqa: E402
+from crosstalk.recordings import Recordings  # noqa: E402
 from crosstalk.server import make_app  # noqa: E402
 from test_engine import make  # noqa: E402
 
@@ -57,7 +58,7 @@ class FakeWhisper:
 
 async def caller_transcript(client: TestClient):
     """Speaks for 1 s, pauses for 1.5 s, and expects the utterance back as text."""
-    ws = await client.ws_connect("/api/chat?codec=pcm&voice_prompt=NATF2&caller_transcript=1")
+    ws = await client.ws_connect("/api/chat?codec=pcm&voice_prompt=NATF2&caller_transcript=1&record=1")
     assert await ws.receive_bytes(timeout=60) == b"\x00"
     t = np.arange(24000) / 24000
     speech = np.concatenate([0.2 * np.sin(2 * np.pi * 220 * t), np.zeros(36000)]).astype(np.float32)
@@ -76,8 +77,8 @@ async def caller_transcript(client: TestClient):
     return events
 
 
-async def call(client: TestClient, codec: str, seconds: float = 3.0):
-    ws = await client.ws_connect(f"/api/chat?codec={codec}&voice_prompt=NATF2&seed=1")
+async def call(client: TestClient, codec: str, seconds: float = 3.0, persona: str = "realestate"):
+    ws = await client.ws_connect(f"/api/chat?codec={codec}&voice_prompt=NATF2&seed=1&persona={persona}")
     msg = await ws.receive_bytes(timeout=60)
     assert msg == b"\x00", msg
     writer = sphn.OpusStreamWriter(24000)
@@ -118,11 +119,20 @@ async def call(client: TestClient, codec: str, seconds: float = 3.0):
 async def main():
     with tempfile.TemporaryDirectory() as tmp:
         app = make_app(
-            TinyEngine(), Bookings(Path(tmp) / "bookings.json"), PreviewCache(Path(tmp) / "previews"), FakeWhisper()
+            TinyEngine(),
+            Bookings(Path(tmp) / "bookings.json"),
+            PreviewCache(Path(tmp) / "previews"),
+            Recordings(Path(tmp) / "recordings"),
+            FakeWhisper(),
         )
         async with TestClient(TestServer(app)) as client:
             cfg = await (await client.get("/api/config")).json()
-            assert cfg["voices"] == ["NATF2"] and "Harbor Lane Realty" in cfg["prompt"] and cfg["caller_transcript"]
+            assert cfg["voices"] == ["NATF2"] and cfg["caller_transcript"] and cfg["default_persona"] == "realestate"
+            assert "Harbor Lane Realty" in cfg["personas"]["realestate"]["prompt"]
+            movies = cfg["personas"]["movies"]
+            assert movies["prompt"].startswith("You enjoy having a good conversation.") and "Sinners" in movies["prompt"]
+            assert {t["title"] for t in movies["topics"]} >= {"The Sopranos", "Sinners", "Clayface"}
+            assert "take" not in movies["topics"][0] and "preview_prompt" not in movies
             assert (await client.get("/")).status == 200
             assert (await client.get("/static/app.js")).status == 200
 
@@ -132,7 +142,7 @@ async def main():
             r = await client.post("/api/bookings", json={"listing_id": "maple", "slot": "Saturday 10 AM", "name": "Bo"})
             assert r.status == 400  # double booking refused
             cfg = await (await client.get("/api/config")).json()
-            maple_times = cfg["prompt"].split("Maple Street viewings: ")[1].split(".")[0]
+            maple_times = cfg["personas"]["realestate"]["prompt"].split("Maple Street viewings: ")[1].split(".")[0]
             assert maple_times == "Saturday at 2 PM, Sunday at 11 AM", maple_times
             listings = await (await client.get("/api/listings")).json()
             assert "Saturday 10 AM" not in listings["listings"][0]["free_slots"]
@@ -151,20 +161,39 @@ async def main():
             assert r.status == 200
             print(f"voice preview: {seconds:.2f}s WAV, rendered in {first:.2f}s, cached in {time.perf_counter() - t0:.3f}s: OK")
             assert (await client.get("/api/voices/NOPE/preview")).status == 404
+            assert (await client.get("/api/voices/NATF2/preview?persona=nope")).status == 404
+            r = await client.get("/api/voices/NATF2/preview?persona=movies")
+            assert r.status == 200
+            assert len(list((Path(tmp) / "previews").glob("NATF2-*.wav"))) == 2  # one per persona
+            print("movie persona: prompt, topics and its own preview: OK")
 
             r = await client.get("/api/chat", headers={"Origin": "https://evil.example", "Upgrade": "websocket"})
             assert r.status == 403
             print("cross-origin WebSocket refused: OK")
 
-            for codec in ("pcm", "opus"):
-                received, texts = await call(client, codec)
-                print(f"{codec} call: received {received / 24000:.2f}s of agent audio, {texts} text messages")
+            # The movie persona's calls sample with a repeat penalty.
+            for codec, persona in (("pcm", "realestate"), ("opus", "movies")):
+                received, texts = await call(client, codec, persona=persona)
+                print(f"{codec} call with {persona}: received {received / 24000:.2f}s of agent audio, {texts} text messages")
                 assert received > 24000, f"expected over 1 s of audio back, got {received} samples"
 
             events = await caller_transcript(client)
             assert [e["type"] for e in events] == ["caller_start", "caller_text"], events
             assert events[0]["id"] == events[1]["id"]
             print(f"caller transcript: {events[1]['text']!r} for 1 s of speech: OK")
+
+            # Only the call made with record=1 is saved; wait=1 covers the save after hang-up.
+            recordings = await (await client.get("/api/recordings?wait=1")).json()
+            assert len(recordings) == 1, recordings
+            rec = recordings[0]
+            assert rec["persona"] == "realestate" and rec["agent"] == "Maya" and rec["duration"] >= 2
+            assert {"who": "caller", "at": events[0]["at"], "text": events[1]["text"]} in rec["messages"]
+            r = await client.get(f"/api/recordings/{rec['id']}/audio")
+            assert r.status == 200 and (await r.read())[:4] == b"OggS"
+            assert (await client.get("/api/recordings/..%2F..%2Fbookings.json/audio")).status == 404
+            assert (await client.delete(f"/api/recordings/{rec['id']}")).status == 200
+            assert await (await client.get("/api/recordings")).json() == []
+            print(f"recording: {rec['duration']}s Ogg/Opus, {len(rec['messages'])} turns, deleted: OK")
 
 
 if __name__ == "__main__":

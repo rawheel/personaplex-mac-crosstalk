@@ -55,6 +55,19 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: v
 h3 { font-size: 14px; margin: 18px 0 8px; }
 .sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
 
+.header-right { display: flex; align-items: center; gap: 14px; }
+.persona-switch {
+  display: inline-flex; padding: 3px; gap: 2px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--bg);
+}
+.persona-switch button {
+  border: 0; border-radius: 999px; padding: 6px 14px;
+  background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer;
+}
+.persona-switch button[aria-pressed="true"] { background: var(--accent); color: white; font-weight: 600; }
+.persona-switch button:disabled { cursor: default; }
+.persona-switch button:disabled:not([aria-pressed="true"]) { opacity: .5; }
+
 .pill {
   font-size: 12px; padding: 5px 11px; border-radius: 999px;
   background: var(--line); color: var(--muted);
@@ -69,7 +82,8 @@ main {
   padding: 18px 28px 28px;
   align-items: start;
 }
-@media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+main.no-side { grid-template-columns: minmax(260px, 1fr) minmax(340px, 1.6fr); }
+@media (max-width: 1000px) { main, main.no-side { grid-template-columns: 1fr; } }
 
 .panel {
   background: var(--panel);
@@ -83,6 +97,8 @@ main {
 .listing .top { display: flex; justify-content: space-between; gap: 8px; }
 .listing .addr { font-weight: 600; }
 .listing .price { font-weight: 600; color: var(--accent); white-space: nowrap; }
+.listing .kind { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.panel-note { margin: 12px 0 0; font-size: 13px; color: var(--muted); }
 .listing .meta, .listing .hl { color: var(--muted); font-size: 13px; margin: 2px 0; }
 .slots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .slot { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
@@ -177,6 +193,27 @@ button.link { border: 0; background: none; color: var(--accent); cursor: pointer
 }
 .suggestion p { margin: 0 0 10px; }
 .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--agent); margin-bottom: 4px !important; }
+
+.record-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+
+.below { padding: 0 28px 28px; }
+.recordings { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.recordings:empty::before { content: "No recordings yet. Calls are saved here while \"Save a recording of the call\" is ticked."; color: var(--muted); font-size: 13px; }
+.recording { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.rec-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.rec-title { font-weight: 600; }
+.rec-meta { font-size: 13px; color: var(--muted); }
+.rec-actions { display: flex; gap: 14px; white-space: nowrap; }
+.rec-actions a { text-decoration: none; font-size: 13px; }
+.link.danger { color: var(--danger); }
+.recording audio { width: 100%; margin-top: 10px; height: 36px; }
+.recording summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 6px; }
+.rec-chat {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px;
+  max-height: 340px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px;
+}
+.rec-chat .msg { border: 0; font: inherit; font-size: 14px; color: inherit; text-align: left; cursor: pointer; }
+.rec-chat .msg:hover { outline: 1px solid var(--line); }
 
 .bookings { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .bookings li {

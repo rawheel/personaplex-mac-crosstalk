@@ -3,26 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Harbor Lane Realty · Voice agent</title>
+  <title>Voice agents</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f6e5c'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <header>
     <div class="brand">
-      <div class="logo" aria-hidden="true">HL</div>
+      <div class="logo" id="logo" aria-hidden="true"></div>
       <div>
-        <h1 id="agency">Harbor Lane Realty</h1>
-        <p class="sub">Talk to <span id="agent-name">Maya</span>, our sales agent, and book a viewing</p>
+        <h1 id="title">Voice agents</h1>
+        <p class="sub" id="tagline"></p>
       </div>
     </div>
-    <span id="status" class="pill">Loading…</span>
+    <div class="header-right">
+      <div id="personas" class="persona-switch" role="group" aria-label="Who to call"></div>
+      <span id="status" class="pill">Loading…</span>
+    </div>
   </header>
 
-  <main>
-    <section class="panel" aria-labelledby="listings-title">
+  <main id="main">
+    <section class="panel" id="listings-panel" aria-labelledby="listings-title">
       <h2 id="listings-title">Listings</h2>
       <div id="listings" class="listings"></div>
+    </section>
+
+    <section class="panel" id="topics-panel" aria-labelledby="topics-title" hidden>
+      <h2 id="topics-title">Favorites</h2>
+      <div id="topics" class="listings"></div>
+      <p class="panel-note">Ask about any of these, or anything else you've watched.</p>
     </section>
 
     <section class="panel call" aria-labelledby="call-title">
@@ -34,9 +43,10 @@
         </button>
         <div class="meters">
           <div class="meter"><span>You</span><div class="bar"><i id="mic-level"></i></div></div>
-          <div class="meter"><span id="agent-label">Maya</span><div class="bar agent"><i id="agent-level"></i></div></div>
+          <div class="meter"><span id="agent-label">Agent</span><div class="bar agent"><i id="agent-level"></i></div></div>
         </div>
         <p class="hint">Use headphones for the best experience: the agent can hear itself through speakers.</p>
+        <label class="record-toggle"><input type="checkbox" id="record" checked> Save a recording of the call</label>
       </div>
 
       <div class="transcript-wrap">
@@ -54,14 +64,14 @@
           <div id="voices"></div>
           <p id="voice-error" class="error" role="alert"></p>
         </fieldset>
-        <label>Role prompt <small>(built from the listings and free viewing times; edits apply to the next call)</small>
+        <label>Role prompt <small id="prompt-hint"></small>
           <textarea id="prompt" rows="7"></textarea>
         </label>
-        <button id="reset-prompt" class="link">Reset to the listings prompt</button>
+        <button id="reset-prompt" class="link">Reset to the default prompt</button>
       </details>
     </section>
 
-    <section class="panel" aria-labelledby="book-title">
+    <section class="panel" id="viewings-panel" aria-labelledby="book-title">
       <h2 id="book-title">Viewings</h2>
 
       <div id="suggestion" class="suggestion" hidden>
@@ -85,6 +95,13 @@
       <ul id="bookings" class="bookings"></ul>
     </section>
   </main>
+
+  <div class="below">
+    <section class="panel" aria-labelledby="recordings-title">
+      <h2 id="recordings-title">Recordings</h2>
+      <ul id="recordings" class="recordings"></ul>
+    </section>
+  </div>
 
   <script src="/static/app.js" type="module"></script>
 </body>

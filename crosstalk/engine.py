@@ -17,6 +17,7 @@ Two things differ from NVIDIA's implementation, both without changing the output
 
 from __future__ import annotations
 
+import collections
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +63,8 @@ class Generator:
         model: Lm,
         text_sampler: Sampler | None = None,
         audio_sampler: Sampler | None = None,
+        repeat_penalty: float = 0.0,
+        repeat_window: int = 40,
     ):
         self.model = model
         cfg = model.cfg
@@ -74,6 +77,11 @@ class Generator:
         self.initial = np.array([cfg.text_card] + [cfg.audio_card] * cfg.n_q, dtype=np.int64)
         self.text_sampler = text_sampler or Sampler(temp=0.7, top_k=25)
         self.audio_sampler = audio_sampler or Sampler(temp=0.8, top_k=250)
+        # Each use of a word token among the agent's last `repeat_window` lowers its logit
+        # by `repeat_penalty`, which breaks loops like "it was so good, it was so good".
+        # Special tokens (padding, i.e. staying quiet) are never penalized.
+        self.repeat_penalty = repeat_penalty
+        self.recent_words: collections.deque[int] = collections.deque(maxlen=repeat_window)
         self.reset()
 
     def reset(self):
@@ -81,6 +89,7 @@ class Generator:
         self.cache = np.full((self.K, self.CT), UNGENERATED, dtype=np.int64)
         self.provided = np.zeros((self.K, self.CT), dtype=bool)
         self.offset = 0
+        self.recent_words.clear()
 
     # --- bookkeeping (NVIDIA LMGen.prepare_step_input / process_transformer_output) ---
 
@@ -139,7 +148,12 @@ class Generator:
     def _sample_step(self, p: _Prepared) -> np.ndarray | None:
         codes = mx.array(p.input[None, :, None].astype(np.int32))
         transformer_out, text_logits = self.model.forward_codes(codes)
-        text, _ = self.text_sampler(text_logits[:, -1:])
+        text_logits = text_logits[:, -1:]
+        if self.repeat_penalty and self.recent_words:
+            ids, counts = np.unique(np.fromiter(self.recent_words, dtype=np.int32), return_counts=True)
+            penalty = mx.array(-self.repeat_penalty * counts.astype(np.float32), dtype=text_logits.dtype)
+            text_logits = text_logits.at[..., mx.array(ids)].add(penalty)
+        text, _ = self.text_sampler(text_logits)
         target = mx.array(p.target[None].astype(np.int32))
         provided = mx.array(p.provided[None])
         next_text = mx.where(provided[:, :1], target[:, :1], text)
@@ -153,7 +167,10 @@ class Generator:
             self.model.depformer_cache,
         )
         mx.eval(text, audio)
-        return self._finish(p, int(text.item()), np.array(audio[0], dtype=np.int64))
+        token = int(text.item())
+        if token > TEXT_PAD and not p.provided[0]:
+            self.recent_words.append(token)
+        return self._finish(p, token, np.array(audio[0], dtype=np.int64))
 
     def step(self, user_tokens: np.ndarray) -> np.ndarray | None:
         """One 80 ms frame: user Mimi codes [8] in, [text, 8 agent codes] out (or None
