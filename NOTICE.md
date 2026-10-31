@@ -6,6 +6,8 @@
   [moshi_mlx](https://github.com/kyutai-labs/moshi) (MIT), which includes code from Apple's
   [mlx-examples](https://github.com/ml-explore/mlx-examples) (MIT). Changes are described at
   the top of each file.
+- Those files keep their original notices at the top: Copyright (c) Kyutai, and Copyright ©
+  2023-2024 Apple Inc. Both are under the MIT license, the same terms as [LICENSE](LICENSE).
 - `crosstalk/engine.py` ports the streaming logic of NVIDIA's
   [PersonaPlex](https://github.com/NVIDIA/personaplex) `LMGen` (MIT), and `crosstalk/convert.py`
   follows the parameter mapping of Kyutai's `scripts/import_mlx.py` (MIT).
