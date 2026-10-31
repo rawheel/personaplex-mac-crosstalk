@@ -54,12 +54,36 @@ from .recordings import Recordings
 from .transcribe import CallerTranscriber, load_model
 
 WEB_DIR = Path(__file__).parent / "web"
+LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 DEFAULT_VOICE = "NATF2"
 DEFAULT_PERSONA = "realestate"
 
 
 def log(msg: str):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def same_site_only(allowed_hosts: frozenset[str] | None):
+    """Only this server's own page may use it. Websites you visit can send requests to
+    localhost too, so every request is checked:
+    - Host must be a loopback name. This stops DNS rebinding, where a site points its own
+      domain at 127.0.0.1 so the browser treats it as the same origin as this server, and
+      then reads your recordings. Pass None to accept any host (the server was bound to a
+      network address on purpose).
+    - Origin, when sent, must be this server. This stops other sites from booking viewings,
+      deleting recordings or opening calls. Clients outside a browser send no Origin."""
+
+    @web.middleware
+    async def middleware(request, handler):
+        host = urlsplit(f"//{request.host}").hostname or ""
+        if allowed_hosts is not None and host not in allowed_hosts:
+            return web.Response(status=403, text="unknown host")
+        origin = request.headers.get("Origin")
+        if origin is not None and urlsplit(origin).netloc != request.host:
+            return web.Response(status=403, text="cross-origin requests are not allowed")
+        return await handler(request)
+
+    return middleware
 
 
 class Session:
@@ -265,11 +289,6 @@ class Server:
         return web.json_response({"ok": True})
 
     async def chat(self, request):
-        # Browsers let any page open a WebSocket to localhost; only accept our own page
-        # (or non-browser clients, which send no Origin header).
-        origin = request.headers.get("Origin")
-        if origin is not None and urlsplit(origin).netloc != request.host:
-            return web.Response(status=403, text="cross-origin connections are not allowed")
         ws = web.WebSocketResponse(max_msg_size=2**22)
         await ws.prepare(request)
 
@@ -478,10 +497,15 @@ class Server:
 
 
 def make_app(
-    engine: Engine, bookings: Bookings, previews: PreviewCache, recordings: Recordings, whisper=None
+    engine: Engine,
+    bookings: Bookings,
+    previews: PreviewCache,
+    recordings: Recordings,
+    whisper=None,
+    allowed_hosts: frozenset[str] | None = LOOPBACK,
 ) -> web.Application:
     server = Server(engine, bookings, previews, recordings, whisper)
-    app = web.Application()
+    app = web.Application(middlewares=[same_site_only(allowed_hosts)])
     app.router.add_get("/", server.index)
     app.router.add_get("/api/config", server.config)
     app.router.add_get("/api/listings", server.listings)
@@ -519,8 +543,24 @@ def main():
         t0 = time.time()
         whisper = load_model(args.whisper)  # downloaded on first use (small.en is about 480 MB)
         log(f"caller transcription: whisper {args.whisper}, loaded in {time.time() - t0:.1f}s")
+    if args.host in LOOPBACK:
+        allowed_hosts = LOOPBACK
+    elif args.host in ("0.0.0.0", "::"):
+        allowed_hosts = None
+    else:
+        allowed_hosts = LOOPBACK | {args.host}
+    if args.host not in LOOPBACK:
+        log(
+            f"warning: listening on {args.host}. There is no login: anyone who can reach this "
+            "address can talk to the agent, listen to your recordings and read your bookings."
+        )
     app = make_app(
-        engine, Bookings(args.bookings), PreviewCache(args.model_dir / "previews"), Recordings(args.recordings), whisper
+        engine,
+        Bookings(args.bookings),
+        PreviewCache(args.model_dir / "previews"),
+        Recordings(args.recordings),
+        whisper,
+        allowed_hosts,
     )
     log(f"open http://{args.host}:{args.port}")
     web.run_app(app, host=args.host, port=args.port, print=None)

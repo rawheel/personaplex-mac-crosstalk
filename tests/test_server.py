@@ -167,9 +167,24 @@ async def main():
             assert len(list((Path(tmp) / "previews").glob("NATF2-*.wav"))) == 2  # one per persona
             print("movie persona: prompt, topics and its own preview: OK")
 
+            # Other websites can reach localhost too.
             r = await client.get("/api/chat", headers={"Origin": "https://evil.example", "Upgrade": "websocket"})
             assert r.status == 403
-            print("cross-origin WebSocket refused: OK")
+            r = await client.post(
+                "/api/bookings",
+                data='{"listing_id": "maple", "slot": "Sunday 11 AM", "name": "x"}',
+                headers={"Origin": "https://evil.example", "Content-Type": "text/plain"},
+            )
+            assert r.status == 403  # a form-style POST needs no CORS preflight
+            for path in ("/api/recordings", "/api/bookings", "/"):  # DNS rebinding: a foreign Host
+                assert (await client.get(path, headers={"Host": "evil.example:8998"})).status == 403, path
+            own = f"http://{client.host}:{client.port}"
+            r = await client.post(
+                "/api/bookings", json={"listing_id": "maple", "slot": "Sunday 11 AM", "name": "x"}, headers={"Origin": own}
+            )
+            assert r.status == 200  # the page's own requests still work
+            assert (await client.delete(f"/api/bookings/{(await r.json())['id']}", headers={"Origin": own})).status == 200
+            print("other websites and DNS rebinding refused, own page allowed: OK")
 
             # The movie persona's calls sample with a repeat penalty.
             for codec, persona in (("pcm", "realestate"), ("opus", "movies")):
