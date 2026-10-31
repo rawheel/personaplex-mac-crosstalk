@@ -119,7 +119,8 @@ that voice.
 - **Runs on MLX** (Metal) instead of CUDA, with 4-bit or 8-bit weights.
 - **Converted once.** Weights are converted and quantized once instead of at every start,
   and voices are converted to safetensors, so the app never needs PyTorch. Voice files are
-  read with an allow-listed unpickler, so a tampered `.pt` file can't run code.
+  read with an allow-listed unpickler that also checks every tensor lies inside its data,
+  so a tampered `.pt` file can't run code or read memory it shouldn't (`tests/test_voices.py`).
 - **Half the depformer work.** NVIDIA samples 16 audio codebooks per frame and discards the
   8 that predict the user's audio. Only the agent's 8 are sampled here; the output is the
   same.

@@ -11,6 +11,7 @@ fails to load instead of executing code.
 
 from __future__ import annotations
 
+import math
 import pickle
 import zipfile
 from collections import OrderedDict
@@ -38,12 +39,26 @@ def _bf16_to_f32(raw: bytes) -> np.ndarray:
 
 
 def _rebuild_tensor(storage, storage_offset, size, stride, *_unused):
+    # The file chooses the view; it must lie inside the storage it came from. as_strided
+    # doesn't check that, and a view past the end would read whatever memory follows.
+    if not isinstance(storage, np.ndarray) or storage.ndim != 1:
+        raise pickle.UnpicklingError("tensor data is not a storage")
+    size, stride = tuple(size), tuple(stride)
+    dims = (storage_offset, *size, *stride)
+    if not all(type(n) is int and n >= 0 for n in dims) or len(size) != len(stride):
+        raise pickle.UnpicklingError("bad tensor shape")
     if len(size) == 0:
+        if storage_offset >= len(storage):
+            raise pickle.UnpicklingError("tensor lies outside its storage")
         return storage[storage_offset : storage_offset + 1].reshape(())
+    count = math.prod(size)
+    last = storage_offset + sum((n - 1) * s for n, s in zip(size, stride))  # index of the last element
+    if count and (last >= len(storage) or count > len(storage) - storage_offset):
+        raise pickle.UnpicklingError("tensor lies outside its storage")
     itemsize = storage.itemsize
     return np.lib.stride_tricks.as_strided(
         storage[storage_offset:],
-        shape=tuple(size),
+        shape=size,
         strides=tuple(s * itemsize for s in stride),
     ).copy()
 
