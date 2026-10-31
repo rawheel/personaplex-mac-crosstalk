@@ -21,6 +21,10 @@ const cases = [
   ["Sam, you're all set for the 11 o’clock viewing on Saturday at 18 Cedar Court.", "cedar|Saturday 11 AM"],
   // Real transcript: the model mixed up listings; Willow has no Saturday 11 slot.
   ["Sam, you allre set for the 11 o’clock viewing on Saturday with 23 Willow Lane.", null],
+  // Real call: the agency name contains "Harbor", and the agent said AM for a PM slot.
+  ["Hello and welcome to Harbor Lane Realty. Yes, we have Saturday at 1 AM or 11 PM.", null],
+  ["Harbor View has Saturday at 1 PM.", "harbor|Saturday 1 PM"],
+  ["Harbor View on Saturday at one o'clock, got it.", "harbor|Saturday 1 PM"],
 ];
 let failed = 0;
 for (const [text, want] of cases) {

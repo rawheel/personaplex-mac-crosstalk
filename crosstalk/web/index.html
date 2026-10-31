@@ -41,17 +41,19 @@
 
       <div class="transcript-wrap">
         <div class="transcript-head">
-          <h3>What the agent said</h3>
+          <h3>Conversation</h3>
           <button id="clear-transcript" class="link">Clear</button>
         </div>
         <div id="transcript" class="transcript" aria-live="polite"></div>
       </div>
 
       <details class="settings">
-        <summary>Voice and prompt</summary>
-        <label>Voice
-          <select id="voice"></select>
-        </label>
+        <summary>Voice and prompt <span id="voice-summary"></span></summary>
+        <fieldset class="voice-picker">
+          <legend>Voice <small>(click one to hear it and pick it; the first listen takes a few seconds)</small></legend>
+          <div id="voices"></div>
+          <p id="voice-error" class="error" role="alert"></p>
+        </fieldset>
         <label>Role prompt <small>(built from the listings and free viewing times; edits apply to the next call)</small>
           <textarea id="prompt" rows="7"></textarea>
         </label>

@@ -8,12 +8,22 @@ their web client and anything built against it work unchanged:
 Query parameters: text_prompt, voice_prompt (e.g. NATF2), seed, and codec=pcm to exchange
 raw 16-bit little-endian mono PCM at 24 kHz instead of Opus (used by the bundled UI).
 Without text_prompt, the real estate agent prompt is used.
+
+With caller_transcript=1 the server also transcribes the caller and sends
+    server -> client  0x03 + utf-8 JSON    {"type": "caller_start", "id": n} as they start
+                                           talking, then {"type": "caller_text", "id": n,
+                                           "text": ...} once it's transcribed (empty if
+                                           it wasn't speech)
+
+GET /api/voices/{voice}/preview returns a WAV of the agent greeting in that voice. The first
+request renders it with the model (a few seconds); after that it's served from disk.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import queue
 import threading
 import time
@@ -29,6 +39,8 @@ from aiohttp import web
 from .agent import Bookings, build_prompt, load_listings
 from .convert import DEFAULT_OUT
 from .engine import FRAME_SIZE, SAMPLE_RATE, Engine, set_seed
+from .previews import PreviewCache, preview_prompt
+from .transcribe import CallerTranscriber, load_model
 
 WEB_DIR = Path(__file__).parent / "web"
 DEFAULT_VOICE = "NATF2"
@@ -140,10 +152,13 @@ class Session:
 
 
 class Server:
-    def __init__(self, engine: Engine, bookings: Bookings):
+    def __init__(self, engine: Engine, bookings: Bookings, previews: PreviewCache, whisper=None):
         self.engine = engine
         self.bookings = bookings
-        self.lock = asyncio.Lock()
+        self.previews = previews
+        self.whisper = whisper  # transcribes the caller; None turns that off
+        self.lock = asyncio.Lock()  # one user of the model at a time: a call or a preview
+        self.in_call = False
 
     def current_prompt(self) -> str:
         return build_prompt(load_listings(), self.bookings.booked_slots())
@@ -154,7 +169,8 @@ class Server:
                 "voices": self.engine.voice_names(),
                 "default_voice": DEFAULT_VOICE,
                 "prompt": self.current_prompt(),
-                "busy": self.lock.locked(),
+                "busy": self.in_call,
+                "caller_transcript": self.whisper is not None,
             }
         )
 
@@ -197,6 +213,7 @@ class Server:
         prompt = q.get("text_prompt", "") or self.current_prompt()
         seed = int(q["seed"]) if q.get("seed") else None
         use_pcm = q.get("codec") == "pcm"
+        transcribe = q.get("caller_transcript") == "1" and self.whisper is not None
         if voice not in self.engine.voice_names():
             await ws.send_bytes(b"\x02" + f"[unknown voice {voice}]".encode())
             await ws.close()
@@ -209,13 +226,49 @@ class Server:
             await ws.send_bytes(b"\x02" + "[busy: another conversation is running]".encode())
             await ws.close()
             return ws
+        self.in_call = True
         try:
-            await self._converse(ws, voice, prompt, seed, use_pcm)
+            await self._converse(ws, voice, prompt, seed, use_pcm, transcribe)
         finally:
+            self.in_call = False
             self.lock.release()
         return ws
 
-    async def _converse(self, ws, voice: str, prompt: str, seed: int | None, use_pcm: bool):
+    async def voice_preview(self, request):
+        voice = request.match_info["voice"]
+        if voice not in self.engine.voice_names():
+            return web.json_response({"error": f"unknown voice {voice}"}, status=404)
+        prompt = preview_prompt(load_listings())
+        path = self.previews.path(voice, prompt)
+        if not path.exists():
+            if self.in_call:
+                return web.json_response({"error": "new voices can be previewed after the call"}, status=409)
+            # Previews clicked in quick succession queue up behind each other.
+            try:
+                await asyncio.wait_for(self.lock.acquire(), timeout=60)
+            except asyncio.TimeoutError:
+                return web.json_response({"error": "the model is busy, try again"}, status=409)
+            job = None
+            try:
+                if not path.exists():
+                    t0 = time.time()
+                    job = asyncio.get_running_loop().run_in_executor(
+                        None, self.previews.make, self.engine, voice, prompt
+                    )
+                    await asyncio.shield(job)
+                    log(f"voice preview {voice} rendered in {time.time() - t0:.1f}s")
+            except Exception as e:
+                log(f"voice preview {voice} failed: {type(e).__name__}: {e}")
+                return web.json_response({"error": f"could not render the preview: {e}"}, status=500)
+            finally:
+                # Hold the lock until the render thread is done, even if this request was
+                # cancelled, so a call never shares the model with it.
+                if job is not None and not job.done():
+                    await asyncio.wait([job])
+                self.lock.release()
+        return web.FileResponse(path, headers={"Content-Type": "audio/wav"})
+
+    async def _converse(self, ws, voice: str, prompt: str, seed: int | None, use_pcm: bool, transcribe: bool):
         log(f"conversation started (voice {voice}, codec {'pcm' if use_pcm else 'opus'})")
         session = Session(self.engine, voice, prompt, seed)
         session.thread.start()
@@ -232,6 +285,8 @@ class Server:
         await ws.send_bytes(b"\x00")
         opus_in = sphn.OpusStreamReader(SAMPLE_RATE)
         opus_out = sphn.OpusStreamWriter(SAMPLE_RATE)
+        caller_events: queue.Queue[dict] = queue.Queue()
+        caller = CallerTranscriber(self.whisper, caller_events.put, log) if transcribe else None
 
         async def recv():
             async for msg in ws:
@@ -244,6 +299,8 @@ class Server:
                     pcm = opus_in.append_bytes(payload)
                 if pcm.size:
                     session.pcm_in.put(pcm)
+                    if caller:
+                        caller.feed(pcm)
 
         async def send():
             while not ws.closed and not session.stop.is_set():
@@ -260,6 +317,9 @@ class Server:
                 while not session.text_out.empty():
                     await ws.send_bytes(b"\x02" + session.text_out.get_nowait().encode())
                     sent = True
+                while not caller_events.empty():
+                    await ws.send_bytes(b"\x03" + json.dumps(caller_events.get_nowait()).encode())
+                    sent = True
                 if not sent:
                     await asyncio.sleep(0.005)
 
@@ -272,6 +332,8 @@ class Server:
             session.stop.set()
             session.pcm_in.put(None)
             await loop.run_in_executor(None, session.thread.join)
+            if caller:
+                await loop.run_in_executor(None, caller.close)
             log(f"conversation ended: {session.summary()}")
             if not ws.closed:
                 await ws.close()
@@ -280,8 +342,8 @@ class Server:
         return web.FileResponse(WEB_DIR / "index.html")
 
 
-def make_app(engine: Engine, bookings: Bookings) -> web.Application:
-    server = Server(engine, bookings)
+def make_app(engine: Engine, bookings: Bookings, previews: PreviewCache, whisper=None) -> web.Application:
+    server = Server(engine, bookings, previews, whisper)
     app = web.Application()
     app.router.add_get("/", server.index)
     app.router.add_get("/api/config", server.config)
@@ -290,6 +352,7 @@ def make_app(engine: Engine, bookings: Bookings) -> web.Application:
     app.router.add_post("/api/bookings", server.add_booking)
     app.router.add_delete("/api/bookings/{id}", server.delete_booking)
     app.router.add_get("/api/chat", server.chat)
+    app.router.add_get("/api/voices/{voice}/preview", server.voice_preview)
     app.router.add_static("/static", WEB_DIR)
     return app
 
@@ -301,12 +364,21 @@ def main():
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=8998)
     parser.add_argument("--bookings", type=Path, default=DEFAULT_OUT.parent / "bookings.json")
+    parser.add_argument(
+        "--whisper", default="small.en", help="Whisper model that transcribes the caller (e.g. base.en, small.en)"
+    )
+    parser.add_argument("--no-caller-transcript", action="store_true", help="show only the agent's words")
     args = parser.parse_args()
 
     t0 = time.time()
     engine = Engine(args.model_dir, None if args.bits == 16 else args.bits)
     log(f"model loaded in {time.time() - t0:.1f}s")
-    app = make_app(engine, Bookings(args.bookings))
+    whisper = None
+    if not args.no_caller_transcript:
+        t0 = time.time()
+        whisper = load_model(args.whisper)  # downloaded on first use (small.en is about 480 MB)
+        log(f"caller transcription: whisper {args.whisper}, loaded in {time.time() - t0:.1f}s")
+    app = make_app(engine, Bookings(args.bookings), PreviewCache(args.model_dir / "previews"), whisper)
     log(f"open http://{args.host}:{args.port}")
     web.run_app(app, host=args.host, port=args.port, print=None)
 
