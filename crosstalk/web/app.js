@@ -75,9 +75,13 @@ function renderListings() {
 function renderSlotOptions() {
   const listing = state.listings.listings.find((l) => l.id === $("book-listing").value);
   const slots = listing ? listing.free_slots : [];
-  $("book-slot").replaceChildren(
+  const select = $("book-slot");
+  const current = select.value;
+  select.replaceChildren(
     ...(slots.length ? slots.map((s) => new Option(s, s)) : [new Option("No times left", "")]),
   );
+  // Keep the user's choice when the listings refresh in the background.
+  if (slots.includes(current)) select.value = current;
 }
 
 async function refreshListings() {
