@@ -1,11 +1,16 @@
-# personaplex-mac-crosstalk
+<p align="center"><img src="docs/logo.svg" width="96" alt=""></p>
+<h1 align="center">Goyaah</h1>
+<p align="center">Full-duplex voice AI on your Mac.<br>NVIDIA's PersonaPlex, ported to Apple Silicon with MLX.</p>
 
-Run NVIDIA's [PersonaPlex](https://github.com/NVIDIA/personaplex) on your Mac: a full-duplex
-voice agent that listens and talks at the same time. You can interrupt it, it backchannels
-("mm-hm", "got it"), and it never waits for a "turn". Everything runs locally on Apple
-Silicon with [MLX](https://github.com/ml-explore/mlx); no GPU server, no API key.
+Goyaah runs NVIDIA's [PersonaPlex](https://github.com/NVIDIA/personaplex) on your Mac: a
+full-duplex voice agent that listens and talks at the same time. You can interrupt it, it
+backchannels ("mm-hm", "got it"), and it never waits for a "turn". Everything runs locally
+on Apple Silicon with [MLX](https://github.com/ml-explore/mlx); no GPU server, no API key.
 
-This is an unofficial community project, not affiliated with or endorsed by NVIDIA.
+Goyaah is the port, not a new model: the voice model is PersonaPlex 7B, which NVIDIA
+fine-tuned from Kyutai's [Moshi](https://github.com/kyutai-labs/moshi). This is an
+unofficial community project, not affiliated with or endorsed by NVIDIA or Kyutai. The
+Python package and its commands are still called `crosstalk`.
 
 Two demo agents come with it, picked with the switch at the top of the page (the agency,
 its listings and the people are made up):
@@ -16,6 +21,26 @@ its listings and the people are made up):
   Better Call Saul, Pulp Fiction, Sinners, Batman and Clayface. Her prompt uses the
   casual-conversation style PersonaPlex learned from real phone calls, so she sounds the
   most natural.
+
+## How it works
+
+![How a call runs: Mimi encodes 80 ms of your audio into 8 codes, the 7B temporal transformer and the depth transformer produce one text token and 8 agent codes, Mimi decodes them back to audio; before the call, the voice sample and text prompt are prefilled](docs/architecture.png)
+
+- **One step per 80 ms frame.** Mimi turns each 80 ms of your audio into 8 codes. The 7B
+  temporal transformer takes those, the agent's own 8 codes from the previous frame and
+  its last text token, and the small depth transformer samples the next text token and
+  the agent's next 8 codes, which Mimi decodes into 80 ms of speech. Nothing waits for you
+  to stop talking, so the agent can cut in, get cut off, and say "yeah" while you speak.
+- **The persona is a prompt.** A call starts with a voice sample (one of 18 voices), half a
+  second of silence, the text prompt in `<system>` tags, and silence again. Every token in
+  that stretch is given, nothing is sampled, so Goyaah pushes it through the model in two
+  batched passes instead of one step per frame.
+- **The chat view** shows the agent's text stream as it speaks. Your side is transcribed
+  by Whisper on the CPU, about a second behind, because PersonaPlex only writes out its
+  own words.
+
+The figure is `docs/architecture.html`; after editing it, re-render with
+`"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --hide-scrollbars --window-size=1400,1060 --force-device-scale-factor=2 --virtual-time-budget=6000 --screenshot=docs/architecture.png "file://$PWD/docs/architecture.html"`.
 
 ## Speed
 
@@ -42,8 +67,8 @@ shapes, which run at the same speed.
 ## Setup
 
 ```bash
-git clone https://github.com/rawheel/personaplex-mac-crosstalk
-cd personaplex-mac-crosstalk
+git clone https://github.com/rawheel/goyaah
+cd goyaah
 uv venv --python 3.12 && uv pip install -e .
 
 uvx --from huggingface_hub hf auth login      # paste a read token
