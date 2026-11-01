@@ -10,8 +10,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from crosstalk.engine import FRAME_SIZE  # noqa: E402
-from crosstalk.recordings import conversation, mix, tracks  # noqa: E402
+from goyaah.engine import FRAME_SIZE  # noqa: E402
+from goyaah.recordings import conversation, mix, tracks  # noqa: E402
 
 
 def test_mix():

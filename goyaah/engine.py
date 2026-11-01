@@ -237,7 +237,7 @@ class Engine:
         self.model_dir = Path(model_dir)
         weights = model_file(self.model_dir, bits)
         if not weights.exists():
-            raise FileNotFoundError(f"{weights} not found, run `crosstalk-convert` first")
+            raise FileNotFoundError(f"{weights} not found, run `goyaah-convert` first")
         cfg = personaplex_7b_config()
         self.model = build_model(cfg, bits)
         self.model.load_weights(str(weights), strict=True)

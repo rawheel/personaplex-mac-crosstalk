@@ -6,9 +6,9 @@ Voice prompts are converted from PyTorch archives to safetensors at the same tim
 runtime never needs PyTorch or pickle.
 
 Usage:
-    crosstalk-convert                 # 4-bit, writes to ~/.cache/crosstalk
-    crosstalk-convert --bits 8
-    crosstalk-convert --delete-original
+    goyaah-convert                 # 4-bit, writes to ~/.cache/goyaah
+    goyaah-convert --bits 8
+    goyaah-convert --delete-original
 """
 
 from __future__ import annotations
@@ -32,12 +32,16 @@ HF_REPO = "nvidia/personaplex-7b-v1"
 CHECKPOINT = "model.safetensors"
 MIMI = "tokenizer-e351c8d8-checkpoint125.safetensors"
 TEXT_TOKENIZER = "tokenizer_spm_32k_3.model"
-DEFAULT_OUT = Path.home() / ".cache" / "crosstalk" / "personaplex-7b-v1"
+CACHE_DIR = Path.home() / ".cache" / "goyaah"
+_OLD_CACHE_DIR = Path.home() / ".cache" / "crosstalk"  # the name before the project was called Goyaah
+if not CACHE_DIR.exists() and _OLD_CACHE_DIR.is_dir():
+    _OLD_CACHE_DIR.rename(CACHE_DIR)
+DEFAULT_OUT = CACHE_DIR / "personaplex-7b-v1"
 CHECKPOINT_DEPFORMER_SLICES = 16
 
 
 def map_weights(pth: dict[str, mx.array], cfg: LmConfig) -> dict[str, mx.array]:
-    """Maps NVIDIA (PyTorch) parameter names to crosstalk (MLX) ones.
+    """Maps NVIDIA (PyTorch) parameter names to goyaah (MLX) ones.
 
     Follows Kyutai's scripts/import_mlx.py: norm `alpha` tensors are squeezed, the
     depformer's per-step weights are split into one module per slice, and only the
@@ -172,7 +176,7 @@ def main():
             shutil.copy(hf_hub_download(HF_REPO, name), dst)
     if not (out_dir / "voices").exists():
         convert_voices(Path(hf_hub_download(HF_REPO, "voices.tgz")), out_dir / "voices")
-    (out_dir / "crosstalk.json").write_text(json.dumps({"source": HF_REPO, "bits": args.bits}))
+    (out_dir / "goyaah.json").write_text(json.dumps({"source": HF_REPO, "bits": args.bits}))
 
     if args.delete_original:
         _delete_cached_checkpoint()

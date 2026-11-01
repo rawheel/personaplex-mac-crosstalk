@@ -1,7 +1,7 @@
 # Adapted from Kyutai's moshi_mlx (MIT): https://github.com/kyutai-labs/moshi
 # Copyright (c) Kyutai, all rights reserved.
 #
-# Changes for crosstalk: cross-attention and conv paths removed, the main transformer
+# Changes for Goyaah: cross-attention and conv paths removed, the main transformer
 # uses a bounded ring cache, and multi-token inputs get a causal mask so that system
 # prompts can be prefilled in a single forward pass.
 

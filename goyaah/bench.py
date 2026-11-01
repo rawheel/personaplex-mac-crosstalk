@@ -1,8 +1,8 @@
 """Checks and measurements for the MLX port.
 
-    crosstalk-bench speed            # ms per 80 ms frame (must stay under 80 for real time)
-    crosstalk-bench verify-prefill   # batched system prompt == frame-by-frame system prompt
-    crosstalk-bench offline in.wav out.wav [--prompt ...] [--voice NATF2]
+    goyaah-bench speed            # ms per 80 ms frame (must stay under 80 for real time)
+    goyaah-bench verify-prefill   # batched system prompt == frame-by-frame system prompt
+    goyaah-bench offline in.wav out.wav [--prompt ...] [--voice NATF2]
 """
 
 from __future__ import annotations

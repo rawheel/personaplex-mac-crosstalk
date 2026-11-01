@@ -19,8 +19,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from crosstalk.convert import convert_voices  # noqa: E402
-from crosstalk.voices import load_voice_pt  # noqa: E402
+from goyaah.convert import convert_voices  # noqa: E402
+from goyaah.voices import load_voice_pt  # noqa: E402
 
 # Stand-ins with the names torch.save writes, so pickle produces a real PyTorch stream
 # without PyTorch installed.

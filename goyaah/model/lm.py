@@ -1,7 +1,7 @@
 # Adapted from Kyutai's moshi_mlx (MIT): https://github.com/kyutai-labs/moshi
 # Copyright (c) Kyutai, all rights reserved.
 #
-# Changes for crosstalk: trimmed to the PersonaPlex architecture, the depformer accepts
+# Changes for Goyaah: trimmed to the PersonaPlex architecture, the depformer accepts
 # teacher-forced audio tokens, and the main model can be fed precomputed embeddings
 # (used to replay PersonaPlex voice prompts).
 

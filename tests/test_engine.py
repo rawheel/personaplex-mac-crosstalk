@@ -11,9 +11,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from crosstalk.engine import SINE_TOKENS, Generator, Voice  # noqa: E402
-from crosstalk.model.lm import Lm, LmConfig, personaplex_7b_config  # noqa: E402
-from crosstalk.model.transformer import TransformerConfig  # noqa: E402
+from goyaah.engine import SINE_TOKENS, Generator, Voice  # noqa: E402
+from goyaah.model.lm import Lm, LmConfig, personaplex_7b_config  # noqa: E402
+from goyaah.model.transformer import TransformerConfig  # noqa: E402
 
 
 def tiny_config(context: int = 3000) -> LmConfig:

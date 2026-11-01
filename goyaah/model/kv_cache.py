@@ -2,7 +2,7 @@
 # https://github.com/ml-explore/mlx-examples/blob/6c2369e4b97f49fb5906ec46033497b39931b25d/llms/mlx_lm/models/base.py#L1
 # Copyright © 2023-2024 Apple Inc.
 #
-# RingKVCache is new in crosstalk.
+# RingKVCache is new in Goyaah.
 
 import mlx.core as mx
 

@@ -1,9 +1,9 @@
-// Booking detection in the agent transcript (crosstalk/web/app.js).
+// Booking detection in the agent transcript (goyaah/web/app.js).
 //     node tests/booking_detection.test.js
 const fs = require("fs");
 const path = require("path");
 
-const web = path.join(__dirname, "..", "crosstalk", "web");
+const web = path.join(__dirname, "..", "goyaah", "web");
 const src = fs.readFileSync(path.join(web, "app.js"), "utf8");
 const grab = (re) => src.match(re)[0];
 const code = [grab(/const DAYS = .*\n.*HOUR_WORDS.*\n/), grab(/function detectBooking[\s\S]*?\n}\n/)].join("\n");

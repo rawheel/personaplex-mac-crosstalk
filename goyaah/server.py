@@ -522,7 +522,7 @@ def make_app(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the crosstalk voice agent server.")
+    parser = argparse.ArgumentParser(description="Run the goyaah voice agent server.")
     parser.add_argument("--model-dir", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--bits", type=int, choices=[4, 8, 16], default=4)
     parser.add_argument("--host", default="localhost")

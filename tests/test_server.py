@@ -24,12 +24,12 @@ from huggingface_hub import hf_hub_download
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crosstalk.agent import Bookings  # noqa: E402
-from crosstalk.convert import HF_REPO, MIMI, TEXT_TOKENIZER  # noqa: E402
-from crosstalk.engine import Engine, Generator  # noqa: E402
-from crosstalk.previews import PreviewCache  # noqa: E402
-from crosstalk.recordings import Recordings  # noqa: E402
-from crosstalk.server import make_app  # noqa: E402
+from goyaah.agent import Bookings  # noqa: E402
+from goyaah.convert import HF_REPO, MIMI, TEXT_TOKENIZER  # noqa: E402
+from goyaah.engine import Engine, Generator  # noqa: E402
+from goyaah.previews import PreviewCache  # noqa: E402
+from goyaah.recordings import Recordings  # noqa: E402
+from goyaah.server import make_app  # noqa: E402
 from test_engine import make  # noqa: E402
 
 

@@ -2,19 +2,19 @@
 
 ## Code
 
-- `crosstalk/model/` is adapted from Kyutai's
+- `goyaah/model/` is adapted from Kyutai's
   [moshi_mlx](https://github.com/kyutai-labs/moshi) (MIT), which includes code from Apple's
   [mlx-examples](https://github.com/ml-explore/mlx-examples) (MIT). Changes are described at
   the top of each file.
 - Those files keep their original notices at the top: Copyright (c) Kyutai, and Copyright ©
   2023-2024 Apple Inc. Both are under the MIT license, the same terms as [LICENSE](LICENSE).
-- `crosstalk/engine.py` ports the streaming logic of NVIDIA's
-  [PersonaPlex](https://github.com/NVIDIA/personaplex) `LMGen` (MIT), and `crosstalk/convert.py`
+- `goyaah/engine.py` ports the streaming logic of NVIDIA's
+  [PersonaPlex](https://github.com/NVIDIA/personaplex) `LMGen` (MIT), and `goyaah/convert.py`
   follows the parameter mapping of Kyutai's `scripts/import_mlx.py` (MIT).
 
 ## Model weights
 
-The model weights are **not** part of this repository. `crosstalk-convert` downloads
+The model weights are **not** part of this repository. `goyaah-convert` downloads
 [nvidia/personaplex-7b-v1](https://huggingface.co/nvidia/personaplex-7b-v1) from Hugging Face,
 which requires accepting its license.
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 def load_listings() -> dict:
-    return json.loads(resources.files("crosstalk").joinpath("data/listings.json").read_text())
+    return json.loads(resources.files("goyaah").joinpath("data/listings.json").read_text())
 
 
 def _price(value: int) -> str:

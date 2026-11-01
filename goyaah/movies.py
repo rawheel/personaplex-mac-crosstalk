@@ -7,7 +7,7 @@ from importlib import resources
 
 
 def load_movies() -> dict:
-    return json.loads(resources.files("crosstalk").joinpath("data/movies.json").read_text())
+    return json.loads(resources.files("goyaah").joinpath("data/movies.json").read_text())
 
 
 def _intro(movies: dict) -> str:
