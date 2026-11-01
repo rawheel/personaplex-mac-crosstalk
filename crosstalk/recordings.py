@@ -1,6 +1,8 @@
-"""Saved calls: both sides mixed into one Ogg/Opus file, plus the conversation as text.
+"""Saved calls: both sides mixed into one Ogg/Opus file, the two sides as a stereo file,
+and the conversation as text.
 
-Each call is a folder named by its start time, holding audio.ogg and call.json.
+Each call is a folder named by its start time, holding audio.ogg (the mix), tracks.ogg
+(caller on the left channel, agent on the right) and call.json.
 """
 
 from __future__ import annotations
@@ -21,16 +23,21 @@ AGENT_PAUSE = 2.0  # seconds without a word that start a new agent turn, as in t
 _ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{4}$")
 
 
-def mix(caller: list[np.ndarray], agent: list[tuple[int, np.ndarray]]) -> np.ndarray:
-    """One mono track: the caller's audio as the server received it, and each agent frame
-    at the point in the call where the model produced it."""
+def tracks(caller: list[np.ndarray], agent: list[tuple[int, np.ndarray]]) -> np.ndarray:
+    """Both sides on one clock, [2, samples]: the caller's audio as the server received it,
+    and each agent frame at the point in the call where the model produced it."""
     caller_pcm = np.concatenate(caller) if caller else np.zeros(0, np.float32)
     end = max([len(caller_pcm)] + [i * FRAME_SIZE + len(pcm) for i, pcm in agent])
-    out = np.zeros(end, np.float32)
-    out[: len(caller_pcm)] += caller_pcm
+    out = np.zeros((2, end), np.float32)
+    out[0, : len(caller_pcm)] = caller_pcm
     for i, pcm in agent:
-        out[i * FRAME_SIZE : i * FRAME_SIZE + len(pcm)] += pcm
-    return np.clip(out, -1, 1)
+        out[1, i * FRAME_SIZE : i * FRAME_SIZE + len(pcm)] += pcm
+    return out
+
+
+def mix(caller: list[np.ndarray], agent: list[tuple[int, np.ndarray]]) -> np.ndarray:
+    """One mono track of both sides."""
+    return np.clip(tracks(caller, agent).sum(axis=0), -1, 1)
 
 
 def conversation(agent_words: list[tuple[float, str]], caller_events: list[dict]) -> list[dict]:
@@ -78,13 +85,17 @@ class Recordings:
         agent_words: list[tuple[float, str]],
         caller_events: list[dict],
     ) -> dict | None:
-        audio = mix(caller_audio, agent_audio)
+        both = tracks(caller_audio, agent_audio)
+        audio = np.clip(both.sum(axis=0), -1, 1)
         if len(audio) < SAMPLE_RATE:  # under a second: nothing worth keeping
             return None
         rid = f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(started))}-{secrets.token_hex(2)}"
         folder = self.directory / rid
         folder.mkdir(parents=True)
         sphn.write_opus(str(folder / "audio.ogg"), audio[None], SAMPLE_RATE)
+        # The two sides apart (caller left, agent right), for waveforms per speaker or
+        # for training data, which wants exactly this layout.
+        sphn.write_opus(str(folder / "tracks.ogg"), both, SAMPLE_RATE)
         meta = {
             "id": rid,
             "started": started,

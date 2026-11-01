@@ -205,6 +205,8 @@ async def main():
             assert {"who": "caller", "at": events[0]["at"], "text": events[1]["text"]} in rec["messages"]
             r = await client.get(f"/api/recordings/{rec['id']}/audio")
             assert r.status == 200 and (await r.read())[:4] == b"OggS"
+            tracks, _ = sphn.read_opus(str(Path(tmp) / "recordings" / rec["id"] / "tracks.ogg"))
+            assert tracks.shape[0] == 2, "tracks.ogg should hold the caller and the agent apart"
             assert (await client.get("/api/recordings/..%2F..%2Fbookings.json/audio")).status == 404
             assert (await client.delete(f"/api/recordings/{rec['id']}")).status == 200
             assert await (await client.get("/api/recordings")).json() == []

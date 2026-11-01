@@ -11,7 +11,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from crosstalk.engine import FRAME_SIZE  # noqa: E402
-from crosstalk.recordings import conversation, mix  # noqa: E402
+from crosstalk.recordings import conversation, mix, tracks  # noqa: E402
 
 
 def test_mix():
@@ -23,6 +23,14 @@ def test_mix():
     assert np.allclose(frame(0), 0.1) and np.allclose(frame(2), 0.3)  # overlap adds up
     assert np.allclose(frame(4), 0.0) and np.allclose(frame(5), 0.3)
     print("mix: agent frames land where they were produced: OK")
+
+    both = tracks(caller, agent)
+    assert both.shape == (2, 6 * FRAME_SIZE)
+    left = lambda k: both[0, k * FRAME_SIZE : (k + 1) * FRAME_SIZE]  # noqa: E731
+    right = lambda k: both[1, k * FRAME_SIZE : (k + 1) * FRAME_SIZE]  # noqa: E731
+    assert np.allclose(left(2), 0.1) and np.allclose(right(2), 0.2)  # no bleed between sides
+    assert np.allclose(left(5), 0.0) and np.allclose(right(5), 0.3)
+    print("tracks: caller on the left, agent on the right: OK")
 
 
 def test_conversation():
